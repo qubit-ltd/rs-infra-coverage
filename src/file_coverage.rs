@@ -28,14 +28,21 @@
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileCoverage {
-    /// The path of the covered source file.
+    /// The path of the covered source file as reported by LLVM.
+    ///
+    /// The path may be absolute or project-relative; filtering resolves it
+    /// against the project root when selecting threshold inputs.
     pub filename: String,
-    /// The percentage of covered lines, if reported.
+    /// The covered-line percentage in the inclusive `0.0..=100.0` range, if
+    /// LLVM reported line metrics.
     pub lines_percent: Option<f64>,
-    /// The percentage of covered functions, if reported.
+    /// The covered-function percentage in the inclusive `0.0..=100.0` range,
+    /// if LLVM reported function metrics.
     pub functions_percent: Option<f64>,
-    /// The percentage of covered regions, if reported.
+    /// The covered-region percentage in the inclusive `0.0..=100.0` range, if
+    /// LLVM reported region metrics.
     pub regions_percent: Option<f64>,
-    /// The percentage of covered branches, if reported.
+    /// The covered-branch percentage in the inclusive `0.0..=100.0` range, if
+    /// LLVM reported branch metrics.
     pub branches_percent: Option<f64>,
 }

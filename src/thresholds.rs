@@ -26,13 +26,21 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Thresholds {
-    /// Minimum line coverage percentage, if configured.
+    /// Minimum line coverage percentage, or `None` to skip line checking.
+    ///
+    /// When configured, the value must be between `0.0` and `100.0`.
     pub lines: Option<f64>,
-    /// Minimum function coverage percentage, if configured.
+    /// Minimum function coverage percentage, or `None` to skip function
+    /// checking. When configured, the value must be between `0.0` and
+    /// `100.0`.
     pub functions: Option<f64>,
-    /// Minimum region coverage percentage, if configured.
+    /// Minimum region coverage percentage, or `None` to skip region checking.
+    ///
+    /// When configured, the value must be between `0.0` and `100.0`.
     pub regions: Option<f64>,
-    /// Minimum branch coverage percentage, if configured.
+    /// Minimum branch coverage percentage, or `None` to skip branch checking.
+    ///
+    /// When configured, the value must be between `0.0` and `100.0`.
     pub branches: Option<f64>,
 }
 

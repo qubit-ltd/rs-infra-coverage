@@ -23,7 +23,10 @@ use serde::Deserialize;
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ClippyConfig {
-    /// Enables `RUSTFLAGS=--cfg coverage` when running Clippy.
+    /// Enables `RUSTFLAGS=--cfg coverage` for the child Clippy process.
+    ///
+    /// This affects only the Clippy invocation and does not change the
+    /// environment of the current process or its caller.
     #[serde(alias = "run_coverage_cfg", alias = "run_coverage_cfg_clippy")]
     pub coverage_cfg: bool,
 }

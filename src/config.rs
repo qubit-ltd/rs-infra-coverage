@@ -32,23 +32,46 @@ use crate::Thresholds;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Selects `default-members`, `workspace`, or `package` collection.
+    ///
+    /// `None` uses `default-members`. The `package` option requires the
+    /// project manifest to declare a package name.
     pub scope: Option<String>,
     /// Lists workspace packages excluded from collection.
+    ///
+    /// The names are passed to `cargo llvm-cov --exclude` and must be
+    /// non-empty.
     #[serde(default)]
     pub exclude_packages: Vec<String>,
-    /// Maps package names to source directory paths included in thresholds.
+    /// Maps package names to relative source directory paths included in
+    /// threshold selection.
+    ///
+    /// An empty map selects the conventional `src/` directory. Paths are
+    /// interpreted relative to the project root and cannot contain `..`.
     #[serde(default)]
     pub source_dirs: BTreeMap<String, Vec<String>>,
     /// Maps package names to source paths excluded from threshold checks.
+    ///
+    /// Exemptions are matched against selected report paths before metrics
+    /// are averaged. Paths are relative to the project root and cannot
+    /// contain `..`.
     #[serde(default)]
     pub threshold_exempt_files: BTreeMap<String, Vec<String>>,
-    /// Defines the minimum coverage percentages.
+    /// Defines the minimum coverage percentages for selected files.
+    ///
+    /// Missing metric values are omitted from the corresponding average;
+    /// metrics without a configured threshold are not checked.
     #[serde(default)]
     pub thresholds: Thresholds,
     /// Configures whether the coverage cfg is used for Clippy.
+    ///
+    /// This nested setting is equivalent to the legacy top-level setting
+    /// [`Self::coverage_cfg_clippy`].
     #[serde(default)]
     pub clippy: ClippyConfig,
     /// Enables coverage cfg for Clippy using the legacy top-level setting.
+    ///
+    /// The nested [`Self::clippy`] setting is preferred for new files; either
+    /// setting enables the flag when it is true.
     #[serde(default, alias = "run_coverage_cfg_clippy")]
     pub coverage_cfg_clippy: bool,
 }
