@@ -7,7 +7,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![中文文档](https://img.shields.io/badge/文档-中文版-blue.svg)](README.zh_CN.md)
 
-Collect LLVM coverage data and evaluate project coverage thresholds from configuration.
+Collect LLVM coverage data, evaluate project coverage thresholds, and run the
+coverage-specific Clippy compatibility check from configuration.
 
 ## Installation
 
@@ -25,9 +26,29 @@ cargo run --manifest-path /path/to/rs-infra-coverage/Cargo.toml -- --help
 
 The project's `.infra` configuration remains the source of truth; this tool does not copy project configuration into the tool repository.
 
+## Commands
+
+```bash
+rs-infra-coverage --project . collect
+rs-infra-coverage --project . check --input target/infra/coverage/raw.json
+rs-infra-coverage --project . report --input target/infra/coverage/raw.json
+rs-infra-coverage --project . clippy --coverage-cfg
+```
+
+`collect` supports `scope` (`default-members`, `workspace`, or `package`) and
+`exclude_packages`. `check` applies configured `thresholds` after removing
+`threshold_exempt_files`. If `.infra/ci/coverage.json` is absent, the legacy
+`.rs-ci-coverage.json` is accepted with a migration warning.
+
+The Clippy command enables `RUSTFLAGS=--cfg coverage` when `--coverage-cfg`,
+`RUN_COVERAGE_CFG_CLIPPY=1`, `coverage_cfg_clippy: true`, or
+`clippy.coverage_cfg: true` is configured.
+
 ## Capabilities and limitations
 
-This first release provides the focused behavior described above. It is intentionally a small building block: project-specific policy belongs in `.infra`, and orchestration belongs in `rs-infra-ci`. It does not promise compatibility with the legacy `rs-ci` scripts beyond the commands currently covered by tests.
+Project-specific policy belongs in `.infra`, and orchestration belongs in
+`rs-infra-ci`. Compatibility is limited to the commands and configuration
+fields documented above.
 
 ## Learn More
 

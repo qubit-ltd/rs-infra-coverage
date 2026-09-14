@@ -7,7 +7,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![English Document](https://img.shields.io/badge/Document-English-blue.svg)](README.md)
 
-收集 LLVM 覆盖率数据，并根据配置评估项目覆盖率阈值。
+收集 LLVM 覆盖率数据、评估项目覆盖率阈值，并执行 coverage cfg 兼容性
+Clippy 检查。
 
 ## 安装
 
@@ -25,9 +26,28 @@ cargo run --manifest-path /path/to/rs-infra-coverage/Cargo.toml -- --help
 
 项目的 `.infra` 配置仍然是行为的唯一来源；工具仓库不会复制项目配置。具体策略由项目配置决定。
 
+## 命令
+
+```bash
+rs-infra-coverage --project . collect
+rs-infra-coverage --project . check --input target/infra/coverage/raw.json
+rs-infra-coverage --project . report --input target/infra/coverage/raw.json
+rs-infra-coverage --project . clippy --coverage-cfg
+```
+
+`collect` 支持 `scope`（`default-members`、`workspace` 或 `package`）和
+`exclude_packages`。`check` 在排除 `threshold_exempt_files` 后应用配置的
+`thresholds`。如果不存在 `.infra/ci/coverage.json`，会兼容读取旧的
+`.rs-ci-coverage.json` 并输出迁移警告。
+
+当使用 `--coverage-cfg`、设置 `RUN_COVERAGE_CFG_CLIPPY=1`、配置
+`coverage_cfg_clippy: true` 或 `clippy.coverage_cfg: true` 时，Clippy 命令会
+设置 `RUSTFLAGS=--cfg coverage`。
+
 ## 能力与限制
 
-当前版本只提供上文列出的专门能力，刻意保持为小型基础设施组件：项目策略放在 `.infra`，任务编排交给 `rs-infra-ci`。对于旧版 `rs-ci` 脚本，只有测试覆盖的命令可视为兼容。
+项目策略放在 `.infra`，任务编排交给 `rs-infra-ci`。兼容范围限定为上文
+记录的命令和配置字段。
 
 ## 延伸阅读
 

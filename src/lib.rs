@@ -21,15 +21,37 @@ pub struct Config {
     pub threshold_exempt_files: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub thresholds: Thresholds,
+    #[serde(default)]
+    pub clippy: ClippyConfig,
+    #[serde(default, alias = "run_coverage_cfg_clippy")]
+    pub coverage_cfg_clippy: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ClippyConfig {
+    #[serde(alias = "run_coverage_cfg", alias = "run_coverage_cfg_clippy")]
+    pub coverage_cfg: bool,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Thresholds {
     pub lines: Option<f64>,
     pub functions: Option<f64>,
     pub regions: Option<f64>,
     pub branches: Option<f64>,
+}
+
+impl Default for Thresholds {
+    fn default() -> Self {
+        Self {
+            lines: Some(90.0),
+            functions: Some(95.0),
+            regions: Some(85.0),
+            branches: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,21 +73,33 @@ pub fn load_config(path: &Path) -> Result<Config> {
     Ok(config)
 }
 
+pub fn resolve_config_path(project: &Path, configured: &Path) -> Result<std::path::PathBuf> {
+    if configured.is_file() {
+        return Ok(configured.to_path_buf());
+    }
+    let modern = project.join(".infra/ci/coverage.json");
+    let legacy = project.join(".rs-ci-coverage.json");
+    if configured == modern && legacy.is_file() {
+        eprintln!(
+            "warning: using legacy coverage configuration {}; migrate to {}",
+            legacy.display(),
+            modern.display()
+        );
+        return Ok(legacy);
+    }
+    Ok(configured.to_path_buf())
+}
+
 pub fn collect(project: &Path, config_path: &Path, output: Option<&Path>) -> Result<()> {
-    let _ = load_config(config_path)?;
+    let config = load_config(config_path)?;
     let default_output = project.join("target/infra/coverage/raw.json");
     let output = output.unwrap_or(&default_output);
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }
-    let status = Command::new("cargo")
-        .args([
-            "llvm-cov",
-            "--workspace",
-            "--all-features",
-            "--json",
-            "--output-path",
-        ])
+    let mut command = Command::new("cargo");
+    command.args(collection_args(&config, project)?);
+    let status = command
         .arg(output)
         .current_dir(project)
         .status()
@@ -74,6 +108,66 @@ pub fn collect(project: &Path, config_path: &Path, output: Option<&Path>) -> Res
         bail!("cargo llvm-cov failed");
     }
     check(project, config_path, output)
+}
+
+pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<()> {
+    let config = load_config(config_path)?;
+    let use_coverage_cfg = coverage_cfg
+        || config.clippy.coverage_cfg
+        || config.coverage_cfg_clippy
+        || std::env::var("RUN_COVERAGE_CFG_CLIPPY").as_deref() == Ok("1");
+    let mut command = Command::new("cargo");
+    command.args([
+        "clippy",
+        "--all-targets",
+        "--all-features",
+        "--",
+        "-D",
+        "warnings",
+    ]);
+    if use_coverage_cfg {
+        command.env("RUSTFLAGS", "--cfg coverage");
+    }
+    let status = command
+        .current_dir(project)
+        .status()
+        .context("failed to start cargo clippy")?;
+    if !status.success() {
+        bail!("cargo clippy failed");
+    }
+    Ok(())
+}
+
+fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
+    let mut args = vec!["llvm-cov".into()];
+    match config.scope.as_deref().unwrap_or("default-members") {
+        "default-members" => {}
+        "workspace" => args.push("--workspace".into()),
+        "package" => {
+            args.push("--package".into());
+            args.push(package_name(project)?);
+        }
+        scope => bail!("scope must be one of default-members, workspace, or package; got {scope}"),
+    }
+    args.push("--all-features".into());
+    for package in &config.exclude_packages {
+        args.push("--exclude".into());
+        args.push(package.clone());
+    }
+    args.extend(["--json".into(), "--output-path".into()]);
+    Ok(args)
+}
+
+fn package_name(project: &Path) -> Result<String> {
+    let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
+    manifest
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("name = \"")
+                .and_then(|value| value.strip_suffix('"'))
+        })
+        .map(str::to_owned)
+        .context("package scope requires a package name in Cargo.toml")
 }
 
 pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
@@ -111,6 +205,24 @@ pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
 fn validate_config(config: &Config) -> Result<()> {
     if config.exclude_packages.iter().any(|name| name.is_empty()) {
         bail!("exclude_packages must contain non-empty strings");
+    }
+    if let Some(scope) = config.scope.as_deref()
+        && !matches!(scope, "default-members" | "workspace" | "package")
+    {
+        bail!("scope must be one of default-members, workspace, or package");
+    }
+    for threshold in [
+        config.thresholds.lines,
+        config.thresholds.functions,
+        config.thresholds.regions,
+        config.thresholds.branches,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !(0.0..=100.0).contains(&threshold) {
+            bail!("coverage thresholds must be between 0 and 100");
+        }
     }
     for (package, paths) in config
         .source_dirs
@@ -278,5 +390,82 @@ mod tests {
         let input = directory.path().join("coverage.json");
         fs::write(&input, r#"{"data":[{"files":[{"filename":"src/lib.rs","summary":{"lines":{"percent":91.0}}}]}]}"#).unwrap();
         assert_eq!(read_files(&input).unwrap()[0].lines_percent, Some(91.0));
+    }
+
+    #[test]
+    fn parses_legacy_scope_threshold_and_clippy_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("coverage.json");
+        fs::write(
+            &input,
+            r#"{
+                "scope":"package",
+                "exclude_packages":["support"],
+                "thresholds":{"lines":91,"functions":92,"regions":93,"branches":94},
+                "clippy":{"coverage_cfg":true}
+            }"#,
+        )
+        .unwrap();
+        let config = load_config(&input).unwrap();
+        assert_eq!(config.scope.as_deref(), Some("package"));
+        assert_eq!(config.thresholds.lines, Some(91.0));
+        assert!(config.clippy.coverage_cfg);
+    }
+
+    #[test]
+    fn parses_top_level_legacy_clippy_setting() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("coverage.json");
+        fs::write(&input, r#"{"run_coverage_cfg_clippy":true}"#).unwrap();
+        assert!(load_config(&input).unwrap().coverage_cfg_clippy);
+    }
+
+    #[test]
+    fn rejects_invalid_scope_and_threshold() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("coverage.json");
+        fs::write(&input, r#"{"scope":"all","thresholds":{"lines":101}}"#).unwrap();
+        assert!(load_config(&input).is_err());
+    }
+
+    #[test]
+    fn builds_stable_collection_arguments() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[package]\nname = \"demo\"\n",
+        )
+        .unwrap();
+        let config = Config {
+            scope: Some("package".into()),
+            exclude_packages: vec!["support".into()],
+            ..Config::default()
+        };
+        assert_eq!(
+            collection_args(&config, directory.path()).unwrap(),
+            vec![
+                "llvm-cov",
+                "--package",
+                "demo",
+                "--all-features",
+                "--exclude",
+                "support",
+                "--json",
+                "--output-path"
+            ]
+        );
+    }
+
+    #[test]
+    fn resolves_legacy_config_when_modern_config_is_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join(".infra/ci")).unwrap();
+        let legacy = directory.path().join(".rs-ci-coverage.json");
+        fs::write(&legacy, "{}").unwrap();
+        let modern = directory.path().join(".infra/ci/coverage.json");
+        assert_eq!(
+            resolve_config_path(directory.path(), &modern).unwrap(),
+            legacy
+        );
     }
 }
