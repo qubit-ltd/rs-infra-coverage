@@ -177,6 +177,11 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
 ///
 /// Returns an error when package scope is selected but the project manifest
 /// has no package name, or when the configured scope is unsupported.
+///
+/// # Parameters
+///
+/// * `config` - The validated coverage configuration.
+/// * `project` - The project root containing the Cargo manifest.
 fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
     let mut args = vec!["llvm-cov".into()];
     match config.scope.as_deref().unwrap_or("default-members") {
@@ -202,6 +207,10 @@ fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
 /// # Errors
 ///
 /// Returns an error when the manifest cannot be read or has no package name.
+///
+/// # Parameters
+///
+/// * `project` - The project root containing `Cargo.toml`.
 fn package_name(project: &Path) -> Result<String> {
     let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
     manifest
@@ -224,6 +233,12 @@ fn package_name(project: &Path) -> Result<String> {
 ///
 /// Returns an error when configuration or report parsing fails, no files are
 /// selected, or one or more thresholds are below the configured minimum.
+///
+/// # Parameters
+///
+/// * `project` - The project root used to interpret source directories.
+/// * `config_path` - The coverage configuration file to load.
+/// * `input` - The LLVM coverage JSON report to read.
 pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let config = load_config(config_path)?;
     let files = read_files(input)?;
@@ -251,6 +266,12 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
 ///
 /// Returns an error when configuration or report parsing fails, or when no
 /// files are selected by the configured source roots.
+///
+/// # Parameters
+///
+/// * `project` - The project root used to interpret source directories.
+/// * `config_path` - The coverage configuration file to load.
+/// * `input` - The LLVM coverage JSON report to read.
 pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let config = load_config(config_path)?;
     let files = read_files(input)?;
@@ -271,6 +292,10 @@ pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
 ///
 /// Returns an error identifying the first unsupported scope, invalid threshold,
 /// empty package name, or unsafe path encountered.
+///
+/// # Parameters
+///
+/// * `config` - The configuration values to validate before execution.
 fn validate_config(config: &Config) -> Result<()> {
     if config.exclude_packages.iter().any(|name| name.is_empty()) {
         bail!("exclude_packages must contain non-empty strings");
@@ -306,6 +331,15 @@ fn validate_config(config: &Config) -> Result<()> {
 }
 
 /// Reports whether a path is a safe, non-empty relative path.
+///
+/// # Parameters
+///
+/// * `path` - The configuration path to validate.
+///
+/// # Returns
+///
+/// `true` when `path` is relative, non-empty, free of parent traversal, and
+/// contains no control characters.
 fn valid_relative_path(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('/')
@@ -319,6 +353,10 @@ fn valid_relative_path(path: &str) -> bool {
 ///
 /// Returns an error when the file cannot be read, the JSON is malformed, the
 /// `data` array is absent, or a file record has no filename.
+///
+/// # Parameters
+///
+/// * `path` - The LLVM coverage JSON report to read.
 fn read_files(path: &Path) -> Result<Vec<FileCoverage>> {
     let value: Value = from_str(&fs::read_to_string(path)?)?;
     let records = value
@@ -362,6 +400,16 @@ fn read_files(path: &Path) -> Result<Vec<FileCoverage>> {
 }
 
 /// Extracts a percentage value from an LLVM metric object.
+///
+/// # Parameters
+///
+/// * `value` - An optional JSON metric object containing a numeric `percent`
+///   field.
+///
+/// # Returns
+///
+/// The reported percentage, or `None` when the object or field is absent or
+/// non-numeric.
 fn percent(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(|value| value.get("percent"))
@@ -369,6 +417,19 @@ fn percent(value: Option<&Value>) -> Option<f64> {
 }
 
 /// Selects a report file when it is inside configured source roots.
+///
+/// Exemptions take precedence over source-root selection. When no source
+/// roots are configured, only the conventional `src/` path is selected.
+///
+/// # Parameters
+///
+/// * `project` - The project root used to make absolute report paths relative.
+/// * `config` - The source-root and exemption configuration.
+/// * `file` - The coverage file candidate to evaluate.
+///
+/// # Returns
+///
+/// `true` when the file is eligible for reporting and threshold evaluation.
 fn selected_file(project: &Path, config: &Config, file: &FileCoverage) -> bool {
     let path = Path::new(&file.filename);
     let relative = path.strip_prefix(project).unwrap_or(path).to_string_lossy();
@@ -389,6 +450,19 @@ fn selected_file(project: &Path, config: &Config, file: &FileCoverage) -> bool {
 }
 
 /// Computes threshold failures from the selected file metrics.
+///
+/// Each configured metric is averaged across the files that provide that
+/// metric. A configured metric with no values is reported as a failure.
+///
+/// # Parameters
+///
+/// * `thresholds` - The minimum percentages to enforce.
+/// * `files` - The files selected for threshold evaluation.
+///
+/// # Returns
+///
+/// A list of human-readable failures, empty when every configured threshold
+/// is satisfied.
 fn threshold_failures(thresholds: &Thresholds, files: &[FileCoverage]) -> Vec<String> {
     let mut failures = Vec::new();
     for (name, threshold, values) in [
@@ -435,6 +509,10 @@ fn threshold_failures(thresholds: &Thresholds, files: &[FileCoverage]) -> Vec<St
 }
 
 /// Prints the selected file count and metric summaries to standard output.
+///
+/// # Parameters
+///
+/// * `files` - The selected coverage files whose metrics should be printed.
 fn report_files(files: &[FileCoverage]) {
     println!("Coverage files: {}", files.len());
     for file in files {
