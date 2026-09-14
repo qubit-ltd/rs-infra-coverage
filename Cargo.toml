@@ -1,0 +1,23 @@
+[package]
+name = "qubit-infra-coverage"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+description = "Rust coverage collection and threshold reporting"
+repository = "https://github.com/qubit-ltd/rs-infra-coverage"
+homepage = "https://qubit-ltd.github.io/rs-infra-coverage/"
+readme = "README.md"
+
+[[bin]]
+name = "rs-infra-coverage"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

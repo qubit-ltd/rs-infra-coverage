@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev, dev-starfish]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: ./align-ci.sh
+      - run: ./ci-check.sh
+
