@@ -383,6 +383,7 @@ struct CoverageRecord {
 
 /// Selects one metric's counts from a coverage record.
 type MetricCountsGetter = fn(&CoverageRecord) -> Option<MetricCounts>;
+type MetricPercentGetter = fn(&CoverageRecord) -> Option<f64>;
 
 /// Reads covered and total counts from one LLVM metric object.
 fn metric_counts(value: Option<&Value>) -> Option<MetricCounts> {
@@ -511,14 +512,37 @@ fn selected_file(project: &Path, config: &Config, file: &FileCoverage) -> bool {
 /// A list of human-readable failures, empty when every configured threshold
 /// is satisfied.
 fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<String> {
-    let metrics: [(&str, Option<f64>, MetricCountsGetter); 4] = [
-        ("lines", thresholds.lines, |file| file.lines),
-        ("functions", thresholds.functions, |file| file.functions),
-        ("regions", thresholds.regions, |file| file.regions),
-        ("branches", thresholds.branches, |file| file.branches),
+    let metrics: [(&str, Option<f64>, MetricCountsGetter, MetricPercentGetter); 4] = [
+        (
+            "lines",
+            thresholds.lines,
+            |file| file.lines,
+            |file| file.coverage.lines_percent,
+        ),
+        (
+            "functions",
+            thresholds.functions,
+            |file| file.functions,
+            |file| file.coverage.functions_percent,
+        ),
+        (
+            "regions",
+            thresholds.regions,
+            |file| file.regions,
+            |file| file.coverage.regions_percent,
+        ),
+        (
+            "branches",
+            thresholds.branches,
+            |file| file.branches,
+            |file| file.coverage.branches_percent,
+        ),
     ];
     let mut failures = Vec::new();
-    for (name, threshold, counts) in metrics {
+    for (name, threshold, counts, percentage) in metrics {
+        let missing_counts = files
+            .iter()
+            .any(|file| percentage(file).is_some() && counts(file).is_none());
         let (covered, count) = files
             .iter()
             .filter_map(counts)
@@ -526,10 +550,12 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
                 (covered + metric.covered, count + metric.count)
             });
         let percent = (count > 0).then(|| covered as f64 / count as f64 * 100.0);
-        if let Some(threshold) = threshold
-            && percent.is_none_or(|percent| percent < threshold)
-        {
-            failures.push(format!("{name} < {threshold:.2}"));
+        if let Some(threshold) = threshold {
+            if missing_counts {
+                failures.push(format!("{name} counts unavailable"));
+            } else if percent.is_none_or(|percent| percent < threshold) {
+                failures.push(format!("{name} < {threshold:.2}"));
+            }
         }
     }
     failures
@@ -593,6 +619,29 @@ mod tests {
             r#"{"data":[{"files":[
                 {"filename":"src/small.rs","summary":{"lines":{"covered":1,"count":1,"percent":100.0}}},
                 {"filename":"src/large.rs","summary":{"lines":{"covered":8,"count":9,"percent":88.8888888889}}}
+            ]}]}"#,
+        )
+        .unwrap();
+
+        assert!(check(project, &config, &input).is_err());
+    }
+
+    #[test]
+    fn rejects_partial_metric_counts_during_threshold_checks() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path();
+        let config = project.join("coverage.json");
+        let input = project.join("report.json");
+        fs::write(
+            &config,
+            r#"{"thresholds":{"lines":0,"functions":null,"regions":null,"branches":null}}"#,
+        )
+        .unwrap();
+        fs::write(
+            &input,
+            r#"{"data":[{"files":[
+                {"filename":"src/counts.rs","summary":{"lines":{"covered":1,"count":1,"percent":100.0}}},
+                {"filename":"src/percent-only.rs","summary":{"lines":{"percent":100.0}}}
             ]}]}"#,
         )
         .unwrap();
