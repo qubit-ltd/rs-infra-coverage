@@ -226,8 +226,8 @@ fn package_name(project: &Path) -> Result<String> {
 /// Checks the selected files against configured coverage thresholds.
 ///
 /// The input report is read from disk; files outside configured source roots
-/// or listed as exemptions are ignored. Selected file metrics are averaged by
-/// metric before comparison.
+/// or listed as exemptions are ignored. Selected metric hit counts are summed
+/// before comparison, so larger source files contribute proportionally more.
 ///
 /// # Errors
 ///
@@ -244,7 +244,7 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let files = read_files(input)?;
     let selected: Vec<_> = files
         .into_iter()
-        .filter(|file| selected_file(project, &config, file))
+        .filter(|file| selected_file(project, &config, &file.coverage))
         .collect();
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
@@ -253,7 +253,12 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     if !failures.is_empty() {
         bail!("coverage thresholds failed: {}", failures.join(", "));
     }
-    report_files(&selected);
+    report_files(
+        &selected
+            .iter()
+            .map(|file| file.coverage.clone())
+            .collect::<Vec<_>>(),
+    );
     Ok(())
 }
 
@@ -277,12 +282,17 @@ pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let files = read_files(input)?;
     let selected: Vec<_> = files
         .into_iter()
-        .filter(|file| selected_file(project, &config, file))
+        .filter(|file| selected_file(project, &config, &file.coverage))
         .collect();
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
-    report_files(&selected);
+    report_files(
+        &selected
+            .iter()
+            .map(|file| file.coverage.clone())
+            .collect::<Vec<_>>(),
+    );
     Ok(())
 }
 
@@ -347,7 +357,43 @@ fn valid_relative_path(path: &str) -> bool {
         && !path.chars().any(|ch| ch.is_control())
 }
 
-/// Reads file summaries from an LLVM coverage JSON report.
+/// Stores the covered and total item counts for one coverage metric.
+#[derive(Debug, Clone, Copy)]
+struct MetricCounts {
+    /// Number of covered items reported by LLVM.
+    covered: u64,
+    /// Total number of items measured by LLVM.
+    count: u64,
+}
+
+/// Retains LLVM hit counts for weighted aggregate threshold evaluation.
+#[derive(Debug)]
+struct CoverageRecord {
+    /// Display metrics and source path for this file.
+    coverage: FileCoverage,
+    /// Line counts reported for this file.
+    lines: Option<MetricCounts>,
+    /// Function counts reported for this file.
+    functions: Option<MetricCounts>,
+    /// Region counts reported for this file.
+    regions: Option<MetricCounts>,
+    /// Branch counts reported for this file.
+    branches: Option<MetricCounts>,
+}
+
+/// Selects one metric's counts from a coverage record.
+type MetricCountsGetter = fn(&CoverageRecord) -> Option<MetricCounts>;
+
+/// Reads covered and total counts from one LLVM metric object.
+fn metric_counts(value: Option<&Value>) -> Option<MetricCounts> {
+    let value = value?;
+    Some(MetricCounts {
+        covered: value.get("covered")?.as_u64()?,
+        count: value.get("count")?.as_u64()?,
+    })
+}
+
+/// Reads file summaries and hit counts from an LLVM coverage JSON report.
 ///
 /// # Errors
 ///
@@ -357,7 +403,7 @@ fn valid_relative_path(path: &str) -> bool {
 /// # Parameters
 ///
 /// * `path` - The LLVM coverage JSON report to read.
-fn read_files(path: &Path) -> Result<Vec<FileCoverage>> {
+fn read_files(path: &Path) -> Result<Vec<CoverageRecord>> {
     let value: Value = from_str(&fs::read_to_string(path)?)?;
     let records = value
         .get("data")
@@ -376,23 +422,23 @@ fn read_files(path: &Path) -> Result<Vec<FileCoverage>> {
                 .and_then(Value::as_str)
                 .context("coverage file has no filename")?
                 .to_owned();
-            files.push(FileCoverage {
-                filename,
-                lines_percent: percent(
-                    file.get("summary").and_then(|summary| summary.get("lines")),
-                ),
-                functions_percent: percent(
-                    file.get("summary")
-                        .and_then(|summary| summary.get("functions")),
-                ),
-                regions_percent: percent(
-                    file.get("summary")
-                        .and_then(|summary| summary.get("regions")),
-                ),
-                branches_percent: percent(
-                    file.get("summary")
-                        .and_then(|summary| summary.get("branches")),
-                ),
+            let summary = file.get("summary");
+            let lines = summary.and_then(|summary| summary.get("lines"));
+            let functions = summary.and_then(|summary| summary.get("functions"));
+            let regions = summary.and_then(|summary| summary.get("regions"));
+            let branches = summary.and_then(|summary| summary.get("branches"));
+            files.push(CoverageRecord {
+                coverage: FileCoverage {
+                    filename,
+                    lines_percent: percent(lines),
+                    functions_percent: percent(functions),
+                    regions_percent: percent(regions),
+                    branches_percent: percent(branches),
+                },
+                lines: metric_counts(lines),
+                functions: metric_counts(functions),
+                regions: metric_counts(regions),
+                branches: metric_counts(branches),
             });
         }
     }
@@ -451,8 +497,9 @@ fn selected_file(project: &Path, config: &Config, file: &FileCoverage) -> bool {
 
 /// Computes threshold failures from the selected file metrics.
 ///
-/// Each configured metric is averaged across the files that provide that
-/// metric. A configured metric with no values is reported as a failure.
+/// Each configured metric is computed from the combined covered and total
+/// counts across selected files. A configured metric with no counts is
+/// reported as a failure.
 ///
 /// # Parameters
 ///
@@ -463,44 +510,24 @@ fn selected_file(project: &Path, config: &Config, file: &FileCoverage) -> bool {
 ///
 /// A list of human-readable failures, empty when every configured threshold
 /// is satisfied.
-fn threshold_failures(thresholds: &Thresholds, files: &[FileCoverage]) -> Vec<String> {
+fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<String> {
+    let metrics: [(&str, Option<f64>, MetricCountsGetter); 4] = [
+        ("lines", thresholds.lines, |file| file.lines),
+        ("functions", thresholds.functions, |file| file.functions),
+        ("regions", thresholds.regions, |file| file.regions),
+        ("branches", thresholds.branches, |file| file.branches),
+    ];
     let mut failures = Vec::new();
-    for (name, threshold, values) in [
-        (
-            "lines",
-            thresholds.lines,
-            files
-                .iter()
-                .filter_map(|file| file.lines_percent)
-                .collect::<Vec<_>>(),
-        ),
-        (
-            "functions",
-            thresholds.functions,
-            files
-                .iter()
-                .filter_map(|file| file.functions_percent)
-                .collect(),
-        ),
-        (
-            "regions",
-            thresholds.regions,
-            files
-                .iter()
-                .filter_map(|file| file.regions_percent)
-                .collect(),
-        ),
-        (
-            "branches",
-            thresholds.branches,
-            files
-                .iter()
-                .filter_map(|file| file.branches_percent)
-                .collect(),
-        ),
-    ] {
+    for (name, threshold, counts) in metrics {
+        let (covered, count) = files
+            .iter()
+            .filter_map(counts)
+            .fold((0_u64, 0_u64), |(covered, count), metric| {
+                (covered + metric.covered, count + metric.count)
+            });
+        let percent = (count > 0).then(|| covered as f64 / count as f64 * 100.0);
         if let Some(threshold) = threshold
-            && (values.is_empty() || values.iter().sum::<f64>() / (values.len() as f64) < threshold)
+            && percent.is_none_or(|percent| percent < threshold)
         {
             failures.push(format!("{name} < {threshold:.2}"));
         }
@@ -532,6 +559,7 @@ mod tests {
     use std::fs;
 
     use super::Config;
+    use super::check;
     use super::collection_args;
     use super::load_config;
     use super::read_files;
@@ -550,6 +578,29 @@ mod tests {
     }
 
     #[test]
+    fn applies_thresholds_to_weighted_coverage_counts() {
+        let directory = tempfile::tempdir().unwrap();
+        let project = directory.path();
+        let config = project.join("coverage.json");
+        let input = project.join("report.json");
+        fs::write(
+            &config,
+            r#"{"thresholds":{"lines":92,"functions":null,"regions":null,"branches":null}}"#,
+        )
+        .unwrap();
+        fs::write(
+            &input,
+            r#"{"data":[{"files":[
+                {"filename":"src/small.rs","summary":{"lines":{"covered":1,"count":1,"percent":100.0}}},
+                {"filename":"src/large.rs","summary":{"lines":{"covered":8,"count":9,"percent":88.8888888889}}}
+            ]}]}"#,
+        )
+        .unwrap();
+
+        assert!(check(project, &config, &input).is_err());
+    }
+
+    #[test]
     fn reads_llvm_file_summary() {
         let directory = tempfile::tempdir().unwrap();
         let input = directory.path().join("coverage.json");
@@ -558,7 +609,10 @@ mod tests {
             r#"{"data":[{"files":[{"filename":"src/lib.rs","summary":{"lines":{"percent":91.0}}}]}]}"#,
         )
         .unwrap();
-        assert_eq!(read_files(&input).unwrap()[0].lines_percent, Some(91.0));
+        assert_eq!(
+            read_files(&input).unwrap()[0].coverage.lines_percent,
+            Some(91.0)
+        );
     }
 
     #[test]

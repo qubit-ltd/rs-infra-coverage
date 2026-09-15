@@ -51,15 +51,15 @@ pub struct Config {
     pub source_dirs: BTreeMap<String, Vec<String>>,
     /// Maps package names to source paths excluded from threshold checks.
     ///
-    /// Exemptions are matched against selected report paths before metrics
-    /// are averaged. Paths are relative to the project root and cannot
+    /// Exemptions are matched against selected report paths before aggregate
+    /// metrics are computed. Paths are relative to the project root and cannot
     /// contain `..`.
     #[serde(default)]
     pub threshold_exempt_files: BTreeMap<String, Vec<String>>,
     /// Defines the minimum coverage percentages for selected files.
     ///
-    /// Missing metric values are omitted from the corresponding average;
-    /// metrics without a configured threshold are not checked.
+    /// Thresholds are evaluated from aggregate covered and total hit counts;
+    /// metrics without counts or a configured threshold are not checked.
     #[serde(default)]
     pub thresholds: Thresholds,
     /// Configures whether the coverage cfg is used for Clippy.
