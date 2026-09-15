@@ -44,6 +44,46 @@ The Clippy command enables `RUSTFLAGS=--cfg coverage` when `--coverage-cfg`,
 `RUN_COVERAGE_CFG_CLIPPY=1`, `coverage_cfg_clippy: true`, or
 `clippy.coverage_cfg: true` is configured.
 
+## Coverage policy
+
+The default gates require **lines >90%, functions >=95%, and regions >85%**.
+Equality fails for lines and regions, including custom thresholds. Branch
+coverage is optional and uses an inclusive minimum. Checks aggregate covered
+and total counts across selected files; unavailable required counts fail.
+Omitting `thresholds`, using `{}`, or omitting individual fields keeps their
+defaults. Explicit `null` cannot disable line, function, or region checks.
+
+For example, if Cargo declares a package named `my-crate`:
+
+```json
+{
+  "scope": "workspace",
+  "source_dirs": {"my-crate": ["src/core", "src/io"]},
+  "threshold_exempt_files": {"my-crate": ["src/core/generated.rs"]},
+  "thresholds": {"lines": 90, "functions": 95, "regions": 85}
+}
+```
+
+`collect`, `check`, and `report` use `cargo metadata --no-deps` to resolve the
+selected packages. They require Cargo and the source checkout, including its
+manifests. `default-members` follows Cargo's default member selection;
+`workspace` selects all members; `package` requires a package at the project
+manifest. `exclude_packages` removes named members. Unknown names, mappings for
+unselected packages, duplicate exclusions, and an empty selection are errors.
+
+Paths are relative to each named package's manifest directory. Each selected
+package without a `source_dirs` entry defaults to `src`. Source arrays must be
+non-empty; directories and exemption files must exist and have the correct
+kind. Paths must be relative, use forward slashes, contain no `..`, colons or
+control characters, and have no duplicates within an array. Duplicate resolved
+source roots are also rejected.
+
+Every source root must match at least one report file **before exemptions**.
+Exemptions match exact canonical file paths, so exempting `src/lib.rs` in one
+package does not exempt the same relative filename in another. An empty result
+after filtering fails. `report` validates the same package/path mapping and
+root hits as `check`, but does not enforce coverage percentages.
+
 ## Capabilities and limitations
 
 Project-specific policy belongs in `.infra`, and orchestration belongs in

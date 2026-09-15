@@ -44,6 +44,41 @@ rs-infra-coverage --project . clippy --coverage-cfg
 `coverage_cfg_clippy: true` 或 `clippy.coverage_cfg: true` 时，Clippy 命令会
 设置 `RUSTFLAGS=--cfg coverage`。
 
+## 覆盖率策略
+
+默认门禁要求 **lines >90%、functions >=95%、regions >85%**。
+lines 和 regions 等于阈值时不通过，自定义阈值也采用同样规则。branches
+可选，采用包含等号的下限。检查按所选文件的 covered/total 总数计算；必需
+计数不可用时失败。省略 `thresholds`、使用 `{}` 或省略其中的字段，均保留
+对应默认值。显式 `null` 不能关闭 lines、functions 或 regions 检查。
+
+例如，Cargo 中声明的 package 名称为 `my-crate` 时：
+
+```json
+{
+  "scope": "workspace",
+  "source_dirs": {"my-crate": ["src/core", "src/io"]},
+  "threshold_exempt_files": {"my-crate": ["src/core/generated.rs"]},
+  "thresholds": {"lines": 90, "functions": 95, "regions": 85}
+}
+```
+
+`collect`、`check` 和 `report` 使用 `cargo metadata --no-deps` 解析所选
+package，因此需要 Cargo 以及包含 manifest 的源码工作副本。`default-members`
+遵循 Cargo 的默认成员选择；`workspace` 选择全部成员；`package` 要求项目
+manifest 声明 package。`exclude_packages` 排除指定成员。未知名称、未选中
+package 的路径映射、重复排除项和空的选择结果都会报错。
+
+路径相对于所指定 package 的 manifest 目录。所选 package 没有 `source_dirs`
+条目时默认使用 `src`。source 数组不能为空；目录和豁免文件必须存在且类型
+正确。路径必须相对寻址、使用正斜杠，不含 `..`、冒号或控制字符，同一数组
+中不能有重复项。解析后重复的 source root 也会报错。
+
+**应用豁免之前**，每个 source root 都必须至少命中一个报告文件。豁免按
+完整规范路径精确匹配，因此一个 package 的 `src/lib.rs` 豁免不会影响另一个
+package 的同名相对路径。过滤后没有文件会失败。`report` 与 `check` 执行
+相同的 package/path 映射及逐个 root 命中校验，但不执行覆盖率百分比门禁。
+
 ## 能力与限制
 
 项目策略放在 `.infra`，任务编排交给 `rs-infra-ci`。兼容范围限定为上文
