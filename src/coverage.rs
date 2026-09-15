@@ -553,8 +553,10 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
         if let Some(threshold) = threshold {
             if missing_counts {
                 failures.push(format!("{name} counts unavailable"));
-            } else if percent.is_none_or(|percent| percent < threshold) {
-                failures.push(format!("{name} < {threshold:.2}"));
+            } else if let Some(percent) = percent.filter(|percent| *percent < threshold) {
+                failures.push(format!("{name} < {threshold:.2} ({percent:.2}%)"));
+            } else if percent.is_none() {
+                failures.push(format!("{name} counts unavailable"));
             }
         }
     }
@@ -623,7 +625,8 @@ mod tests {
         )
         .unwrap();
 
-        assert!(check(project, &config, &input).is_err());
+        let error = check(project, &config, &input).unwrap_err().to_string();
+        assert!(error.contains("lines < 92.00 (90.00%)"));
     }
 
     #[test]
