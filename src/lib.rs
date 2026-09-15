@@ -11,6 +11,7 @@
 mod clippy_config;
 mod config;
 mod coverage;
+mod coverage_plan;
 mod file_coverage;
 mod thresholds;
 

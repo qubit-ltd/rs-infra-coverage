@@ -38,28 +38,30 @@ pub struct Config {
     pub scope: Option<String>,
     /// Lists workspace packages excluded from collection.
     ///
-    /// The names are passed to `cargo llvm-cov --exclude` and must be
-    /// non-empty.
+    /// Names must be unique, non-empty, and identify real workspace packages.
     #[serde(default)]
     pub exclude_packages: Vec<String>,
     /// Maps package names to relative source directory paths included in
     /// threshold selection.
     ///
-    /// An empty map selects the conventional `src/` directory. Paths are
-    /// interpreted relative to the project root and cannot contain `..`.
+    /// Each selected package defaults to `src/` when absent from the map.
+    /// Configured arrays must be non-empty. Paths must name existing directories
+    /// relative to that package's manifest and cannot contain `..`. Every root
+    /// must match a report file before exemptions are applied.
     #[serde(default)]
     pub source_dirs: BTreeMap<String, Vec<String>>,
     /// Maps package names to source paths excluded from threshold checks.
     ///
-    /// Exemptions are matched against selected report paths before aggregate
-    /// metrics are computed. Paths are relative to the project root and cannot
-    /// contain `..`.
+    /// Exemptions match exact canonical file paths before aggregate metrics are
+    /// computed. Paths must name existing files relative to the named, selected
+    /// package's manifest and cannot contain `..`.
     #[serde(default)]
     pub threshold_exempt_files: BTreeMap<String, Vec<String>>,
     /// Defines the minimum coverage percentages for selected files.
     ///
-    /// Thresholds are evaluated from aggregate covered and total hit counts;
-    /// metrics without counts or a configured threshold are not checked.
+    /// Thresholds use aggregate covered and total counts. Missing required
+    /// counts fail. Empty objects and omitted fields retain defaults; explicit
+    /// null cannot disable line, function, or region checks.
     #[serde(default)]
     pub thresholds: Thresholds,
     /// Configures whether the coverage cfg is used for Clippy.

@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 /// Stores minimum acceptable percentages for each LLVM coverage metric.
 ///
-/// The default requires 90% lines, 95% functions, and 85% regions coverage;
+/// The default requires >90% lines, >=95% functions, and >85% regions coverage;
 /// branch coverage has no default threshold.
 ///
 /// # Examples
@@ -24,17 +24,17 @@ use serde::Deserialize;
 /// assert_eq!(thresholds.lines, Some(90.0));
 /// ```
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Thresholds {
-    /// Minimum line coverage percentage, or `None` to skip line checking.
+    /// Exclusive minimum line coverage percentage. `None` is rejected.
     ///
     /// When configured, the value must be between `0.0` and `100.0`.
     pub lines: Option<f64>,
-    /// Minimum function coverage percentage, or `None` to skip function
-    /// checking. When configured, the value must be between `0.0` and
-    /// `100.0`.
+    /// Inclusive minimum function coverage percentage. `None` is rejected.
+    ///
+    /// The value must be between `0.0` and `100.0`.
     pub functions: Option<f64>,
-    /// Minimum region coverage percentage, or `None` to skip region checking.
+    /// Exclusive minimum region coverage percentage. `None` is rejected.
     ///
     /// When configured, the value must be between `0.0` and `100.0`.
     pub regions: Option<f64>,

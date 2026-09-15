@@ -22,6 +22,7 @@ use serde_json::from_str;
 
 use crate::Config;
 use crate::Thresholds;
+use crate::coverage_plan::CoveragePlan;
 use crate::file_coverage::FileCoverage;
 
 /// Loads and validates a coverage configuration file.
@@ -103,7 +104,8 @@ pub fn resolve_config_path(project: &Path, configured: &Path) -> Result<PathBuf>
 /// # Errors
 ///
 /// Returns an error when configuration loading, directory creation, process
-/// startup, collection, report parsing, or threshold checking fails.
+/// startup, Cargo metadata/path validation, collection, report parsing, or
+/// threshold checking fails.
 pub fn collect(project: &Path, config_path: &Path, output: Option<&Path>) -> Result<()> {
     let config = load_config(config_path)?;
     let default_output = project.join("target/infra/coverage/raw.json");
@@ -175,52 +177,23 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
 ///
 /// # Errors
 ///
-/// Returns an error when package scope is selected but the project manifest
-/// has no package name, or when the configured scope is unsupported.
+/// Returns an error when Cargo metadata, package selection, or configured
+/// filesystem paths cannot be validated.
 ///
 /// # Parameters
 ///
 /// * `config` - The validated coverage configuration.
 /// * `project` - The project root containing the Cargo manifest.
 fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
+    let plan = CoveragePlan::load(project, config)?;
     let mut args = vec!["llvm-cov".into()];
-    match config.scope.as_deref().unwrap_or("default-members") {
-        "default-members" => {}
-        "workspace" => args.push("--workspace".into()),
-        "package" => {
-            args.push("--package".into());
-            args.push(package_name(project)?);
-        }
-        scope => bail!("scope must be one of default-members, workspace, or package; got {scope}"),
-    }
-    args.push("--all-features".into());
-    for package in &config.exclude_packages {
-        args.push("--exclude".into());
-        args.push(package.clone());
-    }
-    args.extend(["--json".into(), "--output-path".into()]);
+    args.extend(plan.cargo_args);
+    args.extend([
+        "--all-features".into(),
+        "--json".into(),
+        "--output-path".into(),
+    ]);
     Ok(args)
-}
-
-/// Reads the package name from a project's Cargo manifest.
-///
-/// # Errors
-///
-/// Returns an error when the manifest cannot be read or has no package name.
-///
-/// # Parameters
-///
-/// * `project` - The project root containing `Cargo.toml`.
-fn package_name(project: &Path) -> Result<String> {
-    let manifest = fs::read_to_string(project.join("Cargo.toml"))?;
-    manifest
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("name = \"")
-                .and_then(|value| value.strip_suffix('"'))
-        })
-        .map(str::to_owned)
-        .context("package scope requires a package name in Cargo.toml")
 }
 
 /// Checks the selected files against configured coverage thresholds.
@@ -232,7 +205,9 @@ fn package_name(project: &Path) -> Result<String> {
 /// # Errors
 ///
 /// Returns an error when configuration or report parsing fails, no files are
-/// selected, or one or more thresholds are below the configured minimum.
+/// selected, Cargo metadata or configured paths are invalid, a source root has
+/// no report files, or a threshold comparison fails. Lines and regions require
+/// strictly greater coverage; functions and branches allow equality.
 ///
 /// # Parameters
 ///
@@ -241,11 +216,7 @@ fn package_name(project: &Path) -> Result<String> {
 /// * `input` - The LLVM coverage JSON report to read.
 pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let config = load_config(config_path)?;
-    let files = read_files(input)?;
-    let selected: Vec<_> = files
-        .into_iter()
-        .filter(|file| selected_file(project, &config, &file.coverage))
-        .collect();
+    let selected = select_files(project, &config, read_files(input)?)?;
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
@@ -270,7 +241,8 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error when configuration or report parsing fails, or when no
-/// files are selected by the configured source roots.
+/// files are selected, Cargo metadata or configured paths are invalid, or any
+/// source root has no report files. The source checkout must be available.
 ///
 /// # Parameters
 ///
@@ -279,11 +251,7 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
 /// * `input` - The LLVM coverage JSON report to read.
 pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let config = load_config(config_path)?;
-    let files = read_files(input)?;
-    let selected: Vec<_> = files
-        .into_iter()
-        .filter(|file| selected_file(project, &config, &file.coverage))
-        .collect();
+    let selected = select_files(project, &config, read_files(input)?)?;
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
@@ -315,6 +283,21 @@ fn validate_config(config: &Config) -> Result<()> {
     {
         bail!("scope must be one of default-members, workspace, or package");
     }
+    for (name, threshold) in [
+        ("lines", config.thresholds.lines),
+        ("functions", config.thresholds.functions),
+        ("regions", config.thresholds.regions),
+    ] {
+        if threshold.is_none() {
+            bail!("{name} coverage threshold cannot be disabled");
+        }
+    }
+    if has_duplicates(&config.exclude_packages) {
+        bail!("exclude_packages must not contain duplicates");
+    }
+    if config.source_dirs.values().any(Vec::is_empty) {
+        bail!("each source_dirs array must be non-empty");
+    }
     for threshold in [
         config.thresholds.lines,
         config.thresholds.functions,
@@ -333,11 +316,22 @@ fn validate_config(config: &Config) -> Result<()> {
         .iter()
         .chain(config.threshold_exempt_files.iter())
     {
+        if has_duplicates(paths) {
+            bail!("coverage paths for package '{package}' must not contain duplicates");
+        }
         if package.is_empty() || paths.iter().any(|path| !valid_relative_path(path)) {
             bail!("coverage paths must be non-empty relative paths without '..'");
         }
     }
     Ok(())
+}
+
+/// Returns whether a configuration list repeats a value, without modifying it.
+fn has_duplicates(values: &[String]) -> bool {
+    values
+        .iter()
+        .enumerate()
+        .any(|(index, value)| values[..index].contains(value))
 }
 
 /// Reports whether a path is a safe, non-empty relative path.
@@ -353,6 +347,8 @@ fn validate_config(config: &Config) -> Result<()> {
 fn valid_relative_path(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('/')
+        && !path.contains('\\')
+        && !path.contains(':')
         && !path.split('/').any(|part| part == "..")
         && !path.chars().any(|ch| ch.is_control())
 }
@@ -463,37 +459,40 @@ fn percent(value: Option<&Value>) -> Option<f64> {
         .and_then(Value::as_f64)
 }
 
-/// Selects a report file when it is inside configured source roots.
+/// Resolves report paths and validates that every configured root was measured.
 ///
-/// Exemptions take precedence over source-root selection. When no source
-/// roots are configured, only the conventional `src/` path is selected.
-///
-/// # Parameters
-///
-/// * `project` - The project root used to make absolute report paths relative.
-/// * `config` - The source-root and exemption configuration.
-/// * `file` - The coverage file candidate to evaluate.
-///
-/// # Returns
-///
-/// `true` when the file is eligible for reporting and threshold evaluation.
-fn selected_file(project: &Path, config: &Config, file: &FileCoverage) -> bool {
-    let path = Path::new(&file.filename);
-    let relative = path.strip_prefix(project).unwrap_or(path).to_string_lossy();
-    if config
-        .threshold_exempt_files
-        .values()
-        .flatten()
-        .any(|excluded| relative.ends_with(excluded))
-    {
-        return false;
+/// Runs Cargo metadata and checks configured package paths through the plan.
+/// Root matching precedes exemptions, so exempt files still prove their source
+/// root was measured. Returns an error for an invalid plan or an unmatched root.
+fn select_files(
+    project: &Path,
+    config: &Config,
+    files: Vec<CoverageRecord>,
+) -> Result<Vec<CoverageRecord>> {
+    let plan = CoveragePlan::load(project, config)?;
+    let paths: Vec<_> = files
+        .iter()
+        .map(|file| plan.report_path(&file.coverage.filename))
+        .collect();
+    for root in &plan.roots {
+        if !paths
+            .iter()
+            .any(|path| path.starts_with(root) && path != root)
+        {
+            bail!("source root '{}' matched no coverage files", root.display());
+        }
     }
-    if config.source_dirs.is_empty() {
-        return relative.starts_with("src/") || relative == "src";
-    }
-    config.source_dirs.values().flatten().any(|source| {
-        relative.starts_with(&format!("{source}/")) || relative.as_ref() == source.as_str()
-    })
+    Ok(files
+        .into_iter()
+        .zip(paths)
+        .filter(|(_, path)| {
+            plan.roots
+                .iter()
+                .any(|root| path.starts_with(root) && path != root)
+                && !plan.exemptions.contains(path)
+        })
+        .map(|(file, _)| file)
+        .collect())
 }
 
 /// Computes threshold failures from the selected file metrics.
@@ -553,8 +552,19 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
         if let Some(threshold) = threshold {
             if missing_counts {
                 failures.push(format!("{name} counts unavailable"));
-            } else if let Some(percent) = percent.filter(|percent| *percent < threshold) {
-                failures.push(format!("{name} < {threshold:.2} ({percent:.2}%)"));
+            } else if let Some(percent) = percent.filter(|percent| {
+                if matches!(name, "lines" | "regions") {
+                    *percent <= threshold
+                } else {
+                    *percent < threshold
+                }
+            }) {
+                let operator = if matches!(name, "lines" | "regions") {
+                    "<="
+                } else {
+                    "<"
+                };
+                failures.push(format!("{name} {operator} {threshold:.2} ({percent:.2}%)"));
             } else if percent.is_none() {
                 failures.push(format!("{name} counts unavailable"));
             }
@@ -609,13 +619,16 @@ mod tests {
     fn applies_thresholds_to_weighted_coverage_counts() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path();
+        fs::create_dir_all(project.join("src")).expect("source root");
+        fs::write(project.join("src/lib.rs"), "").expect("library target");
+        fs::write(
+            project.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("package manifest");
         let config = project.join("coverage.json");
         let input = project.join("report.json");
-        fs::write(
-            &config,
-            r#"{"thresholds":{"lines":92,"functions":null,"regions":null,"branches":null}}"#,
-        )
-        .unwrap();
+        fs::write(&config, r#"{"thresholds":{"lines":92}}"#).unwrap();
         fs::write(
             &input,
             r#"{"data":[{"files":[
@@ -626,20 +639,23 @@ mod tests {
         .unwrap();
 
         let error = check(project, &config, &input).unwrap_err().to_string();
-        assert!(error.contains("lines < 92.00 (90.00%)"));
+        assert!(error.contains("lines <= 92.00 (90.00%)"));
     }
 
     #[test]
     fn rejects_partial_metric_counts_during_threshold_checks() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path();
+        fs::create_dir_all(project.join("src")).expect("source root");
+        fs::write(project.join("src/lib.rs"), "").expect("library target");
+        fs::write(
+            project.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("package manifest");
         let config = project.join("coverage.json");
         let input = project.join("report.json");
-        fs::write(
-            &config,
-            r#"{"thresholds":{"lines":0,"functions":null,"regions":null,"branches":null}}"#,
-        )
-        .unwrap();
+        fs::write(&config, r#"{"thresholds":{"lines":0}}"#).unwrap();
         fs::write(
             &input,
             r#"{"data":[{"files":[
@@ -649,7 +665,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(check(project, &config, &input).is_err());
+        let error = check(project, &config, &input).expect_err("partial counts must fail");
+        assert!(
+            error.to_string().contains("lines counts unavailable"),
+            "{error:#}"
+        );
     }
 
     #[test]
@@ -711,9 +731,10 @@ mod tests {
             "[package]\nname = \"demo\"\n",
         )
         .unwrap();
+        fs::create_dir_all(directory.path().join("src")).expect("source root");
+        fs::write(directory.path().join("src/lib.rs"), "").expect("library target");
         let config = Config {
             scope: Some("package".into()),
-            exclude_packages: vec!["support".into()],
             ..Config::default()
         };
         assert_eq!(
@@ -723,8 +744,6 @@ mod tests {
                 "--package",
                 "demo",
                 "--all-features",
-                "--exclude",
-                "support",
                 "--json",
                 "--output-path"
             ]
