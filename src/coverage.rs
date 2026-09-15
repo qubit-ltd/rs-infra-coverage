@@ -249,16 +249,16 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
-    let failures = threshold_failures(&config.thresholds, &selected);
-    if !failures.is_empty() {
-        bail!("coverage thresholds failed: {}", failures.join(", "));
-    }
     report_files(
         &selected
             .iter()
             .map(|file| file.coverage.clone())
             .collect::<Vec<_>>(),
     );
+    let failures = threshold_failures(&config.thresholds, &selected);
+    if !failures.is_empty() {
+        bail!("coverage thresholds failed: {}", failures.join(", "));
+    }
     Ok(())
 }
 
