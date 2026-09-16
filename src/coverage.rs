@@ -210,7 +210,7 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
-    report_files(&selected);
+    report_files(project, &selected);
     let failures = threshold_failures(&config.thresholds, &selected);
     if !failures.is_empty() {
         report_thresholds(&config.thresholds, &selected, false);
@@ -242,7 +242,7 @@ pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
-    report_files(&selected);
+    report_files(project, &selected);
     Ok(())
 }
 
@@ -536,13 +536,13 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
 /// # Parameters
 ///
 /// * `files` - The selected coverage files whose metrics should be printed.
-fn report_files(files: &[CoverageRecord]) {
-    print!("{}", coverage_summary(files));
+fn report_files(project: &Path, files: &[CoverageRecord]) {
+    print!("{}", coverage_summary(project, files));
 }
 
 /// Builds the source-file coverage table shown by collection and check
 /// commands.
-fn coverage_summary(files: &[CoverageRecord]) -> String {
+fn coverage_summary(project: &Path, files: &[CoverageRecord]) -> String {
     let mut output = String::from("Coverage summary:\n");
     use std::fmt::Write;
 
@@ -562,7 +562,7 @@ fn coverage_summary(files: &[CoverageRecord]) -> String {
         writeln!(
             output,
             "  {:<56} {:>20} {:>20} {:>20} {:>20}",
-            shorten_path(&file.coverage.filename, 56),
+            shorten_path(&display_source_path(project, &file.coverage.filename), 56),
             display_metric(file.functions, file.coverage.functions_percent),
             display_metric(file.lines, file.coverage.lines_percent),
             display_metric(file.regions, file.coverage.regions_percent),
@@ -572,6 +572,16 @@ fn coverage_summary(files: &[CoverageRecord]) -> String {
     }
     output.push('\n');
     output
+}
+
+/// Converts an absolute report filename into a path relative to the project
+/// root for compact, stable coverage output.
+fn display_source_path(project: &Path, filename: &str) -> String {
+    Path::new(filename)
+        .strip_prefix(project)
+        .unwrap_or_else(|_| Path::new(filename))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Formats one coverage metric with its percentage and hit counts.
@@ -627,6 +637,7 @@ fn report_thresholds(thresholds: &Thresholds, files: &[CoverageRecord], passed: 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
 
     use super::Config;
     use super::CoverageRecord;
@@ -656,7 +667,7 @@ mod tests {
             branches: None,
         }];
 
-        let summary = coverage_summary(&files);
+        let summary = coverage_summary(Path::new("/project"), &files);
 
         assert!(summary.contains("Source"));
         assert!(summary.contains("src/lib.rs"));
@@ -664,6 +675,28 @@ mod tests {
         assert!(summary.contains("90.00% (9/10)"));
         assert!(summary.contains("85.00% (17/20)"));
         assert!(summary.contains("n/a"));
+    }
+
+    #[test]
+    fn coverage_summary_displays_absolute_paths_relative_to_project() {
+        let files = [CoverageRecord {
+            coverage: FileCoverage {
+                filename: "/project/src/argument/argument_error.rs".into(),
+                lines_percent: Some(100.0),
+                functions_percent: Some(100.0),
+                regions_percent: Some(100.0),
+                branches_percent: None,
+            },
+            lines: Some(MetricCounts { covered: 1, count: 1 }),
+            functions: Some(MetricCounts { covered: 1, count: 1 }),
+            regions: Some(MetricCounts { covered: 1, count: 1 }),
+            branches: None,
+        }];
+
+        let summary = coverage_summary(Path::new("/project"), &files);
+
+        assert!(summary.contains("src/argument/argument_error.rs"));
+        assert!(!summary.contains(".../project/src/argument/argument_error.rs"));
     }
 
     #[test]
