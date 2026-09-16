@@ -220,16 +220,13 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
-    report_files(
-        &selected
-            .iter()
-            .map(|file| file.coverage.clone())
-            .collect::<Vec<_>>(),
-    );
+    report_files(&selected);
     let failures = threshold_failures(&config.thresholds, &selected);
     if !failures.is_empty() {
+        report_thresholds(&config.thresholds, &selected, false);
         bail!("coverage thresholds failed: {}", failures.join(", "));
     }
+    report_thresholds(&config.thresholds, &selected, true);
     Ok(())
 }
 
@@ -255,12 +252,7 @@ pub fn report(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     if selected.is_empty() {
         bail!("coverage report contains no files selected by the configured source roots");
     }
-    report_files(
-        &selected
-            .iter()
-            .map(|file| file.coverage.clone())
-            .collect::<Vec<_>>(),
-    );
+    report_files(&selected);
     Ok(())
 }
 
@@ -578,17 +570,98 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
 /// # Parameters
 ///
 /// * `files` - The selected coverage files whose metrics should be printed.
-fn report_files(files: &[FileCoverage]) {
-    println!("Coverage files: {}", files.len());
+fn report_files(files: &[CoverageRecord]) {
+    print!("{}", coverage_summary(files));
+}
+
+/// Builds the source-file coverage table shown by collection and check commands.
+fn coverage_summary(files: &[CoverageRecord]) -> String {
+    let mut output = String::from("Coverage summary:\n");
+    use std::fmt::Write;
+
+    writeln!(
+        output,
+        "  {:<56} {:>20} {:>20} {:>20} {:>20}",
+        "Source", "Functions", "Lines", "Regions", "Branches"
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
+        output,
+        "  {:<56} {:>20} {:>20} {:>20} {:>20}",
+        "------", "---------", "-----", "-------", "--------"
+    )
+    .expect("writing to a String cannot fail");
     for file in files {
-        println!(
-            "  {} lines={:?} functions={:?} regions={:?} branches={:?}",
-            file.filename,
-            file.lines_percent,
-            file.functions_percent,
-            file.regions_percent,
-            file.branches_percent
-        );
+        writeln!(
+            output,
+            "  {:<56} {:>20} {:>20} {:>20} {:>20}",
+            shorten_path(&file.coverage.filename, 56),
+            display_metric(file.functions, file.coverage.functions_percent),
+            display_metric(file.lines, file.coverage.lines_percent),
+            display_metric(file.regions, file.coverage.regions_percent),
+            display_metric(file.branches, file.coverage.branches_percent),
+        )
+        .expect("writing to a String cannot fail");
+    }
+    output.push('\n');
+    output
+}
+
+/// Formats one coverage metric with its percentage and hit counts.
+fn display_metric(counts: Option<MetricCounts>, percentage: Option<f64>) -> String {
+    match (counts, percentage) {
+        (Some(counts), Some(percentage)) => {
+            format!("{percentage:.2}% ({}/{})", counts.covered, counts.count)
+        }
+        _ => "n/a".into(),
+    }
+}
+
+/// Shortens long source paths while retaining their most useful suffix.
+fn shorten_path(path: &str, max_length: usize) -> String {
+    if path.chars().count() <= max_length {
+        return path.to_owned();
+    }
+    let suffix: String = path
+        .chars()
+        .rev()
+        .take(max_length.saturating_sub(3))
+        .collect();
+    format!("...{}", suffix.chars().rev().collect::<String>())
+}
+
+/// Prints the crate-wide threshold result and actual aggregate percentages.
+fn report_thresholds(thresholds: &Thresholds, files: &[CoverageRecord], passed: bool) {
+    let status = if passed { "satisfied" } else { "failed" };
+    println!("Coverage thresholds {status}:");
+    let metrics: [(&str, Option<f64>, MetricCountsGetter); 4] = [
+        ("functions", thresholds.functions, |file| file.functions),
+        ("lines", thresholds.lines, |file| file.lines),
+        ("regions", thresholds.regions, |file| file.regions),
+        ("branches", thresholds.branches, |file| file.branches),
+    ];
+    for (name, threshold, counts) in metrics {
+        if let Some(threshold) = threshold {
+            let (covered, count) = files
+                .iter()
+                .filter_map(counts)
+                .fold((0_u64, 0_u64), |(covered, count), metric| {
+                    (covered + metric.covered, count + metric.count)
+                });
+            let operator = if matches!(name, "lines" | "regions") {
+                ">"
+            } else {
+                ">="
+            };
+            if count == 0 {
+                println!("  {name}: {operator} {threshold:.2}% (actual n/a)");
+            } else {
+                println!(
+                    "  {name}: {operator} {threshold:.2}% (actual {:.2}%, {covered}/{count})",
+                    covered as f64 / count as f64 * 100.0
+                );
+            }
+        }
     }
 }
 
@@ -597,12 +670,51 @@ mod tests {
     use std::fs;
 
     use super::Config;
+    use super::CoverageRecord;
+    use super::MetricCounts;
     use super::check;
     use super::collection_args;
+    use super::coverage_summary;
     use super::load_config;
     use super::read_files;
     use super::resolve_config_path;
     use super::validate_config;
+    use crate::file_coverage::FileCoverage;
+
+    #[test]
+    fn coverage_summary_prints_file_metrics_with_counts_and_missing_values() {
+        let files = [CoverageRecord {
+            coverage: FileCoverage {
+                filename: "src/lib.rs".into(),
+                lines_percent: Some(90.0),
+                functions_percent: Some(95.0),
+                regions_percent: Some(85.0),
+                branches_percent: None,
+            },
+            lines: Some(MetricCounts {
+                covered: 9,
+                count: 10,
+            }),
+            functions: Some(MetricCounts {
+                covered: 19,
+                count: 20,
+            }),
+            regions: Some(MetricCounts {
+                covered: 17,
+                count: 20,
+            }),
+            branches: None,
+        }];
+
+        let summary = coverage_summary(&files);
+
+        assert!(summary.contains("Source"));
+        assert!(summary.contains("src/lib.rs"));
+        assert!(summary.contains("95.00% (19/20)"));
+        assert!(summary.contains("90.00% (9/10)"));
+        assert!(summary.contains("85.00% (17/20)"));
+        assert!(summary.contains("n/a"));
+    }
 
     #[test]
     fn rejects_invalid_source_path() {
