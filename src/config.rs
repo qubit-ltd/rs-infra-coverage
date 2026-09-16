@@ -45,9 +45,10 @@ pub struct Config {
     /// threshold selection.
     ///
     /// Each selected package defaults to `src/` when absent from the map.
-    /// Configured arrays must be non-empty. Paths must name existing directories
-    /// relative to that package's manifest and cannot contain `..`. Every root
-    /// must match a report file before exemptions are applied.
+    /// Configured arrays must be non-empty. Paths must name existing
+    /// directories relative to that package's manifest and cannot contain
+    /// `..`. Every root must match a report file before exemptions are
+    /// applied.
     #[serde(default)]
     pub source_dirs: BTreeMap<String, Vec<String>>,
     /// Maps package names to source paths excluded from threshold checks.

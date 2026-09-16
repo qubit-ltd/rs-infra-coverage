@@ -15,7 +15,6 @@ use std::process;
 use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
-
 use qubit_infra_coverage::check;
 use qubit_infra_coverage::clippy;
 use qubit_infra_coverage::collect;
@@ -66,7 +65,8 @@ enum Command {
     },
 }
 
-/// Parses CLI arguments, resolves the project configuration, and runs a command.
+/// Parses CLI arguments, resolves the project configuration, and runs a
+/// command.
 ///
 /// # Errors
 ///

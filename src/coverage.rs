@@ -99,7 +99,8 @@ pub fn resolve_config_path(project: &Path, configured: &Path) -> Result<PathBuf>
 ///
 /// * `project` - The project root in which Cargo is executed.
 /// * `config_path` - The coverage configuration file.
-/// * `output` - Optional report path; defaults to `target/infra/coverage/raw.json`.
+/// * `output` - Optional report path; defaults to
+///   `target/infra/coverage/raw.json`.
 ///
 /// # Errors
 ///
@@ -149,14 +150,7 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
         || config.coverage_cfg_clippy
         || env::var("RUN_COVERAGE_CFG_CLIPPY").as_deref() == Ok("1");
     let mut command = Command::new("cargo");
-    command.args([
-        "clippy",
-        "--all-targets",
-        "--all-features",
-        "--",
-        "-D",
-        "warnings",
-    ]);
+    command.args(["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]);
     if use_coverage_cfg {
         command.env("RUSTFLAGS", "--cfg coverage");
     }
@@ -188,11 +182,7 @@ fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
     let plan = CoveragePlan::load(project, config)?;
     let mut args = vec!["llvm-cov".into()];
     args.extend(plan.cargo_args);
-    args.extend([
-        "--all-features".into(),
-        "--json".into(),
-        "--output-path".into(),
-    ]);
+    args.extend(["--all-features".into(), "--json".into(), "--output-path".into()]);
     Ok(args)
 }
 
@@ -303,11 +293,7 @@ fn validate_config(config: &Config) -> Result<()> {
             bail!("coverage thresholds must be between 0 and 100");
         }
     }
-    for (package, paths) in config
-        .source_dirs
-        .iter()
-        .chain(config.threshold_exempt_files.iter())
-    {
+    for (package, paths) in config.source_dirs.iter().chain(config.threshold_exempt_files.iter()) {
         if has_duplicates(paths) {
             bail!("coverage paths for package '{package}' must not contain duplicates");
         }
@@ -400,12 +386,7 @@ fn read_files(path: &Path) -> Result<Vec<CoverageRecord>> {
         .context("coverage JSON must contain a data array")?;
     let mut files = Vec::new();
     for record in records {
-        for file in record
-            .get("files")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
+        for file in record.get("files").and_then(Value::as_array).into_iter().flatten() {
             let filename = file
                 .get("filename")
                 .and_then(Value::as_str)
@@ -446,31 +427,23 @@ fn read_files(path: &Path) -> Result<Vec<CoverageRecord>> {
 /// The reported percentage, or `None` when the object or field is absent or
 /// non-numeric.
 fn percent(value: Option<&Value>) -> Option<f64> {
-    value
-        .and_then(|value| value.get("percent"))
-        .and_then(Value::as_f64)
+    value.and_then(|value| value.get("percent")).and_then(Value::as_f64)
 }
 
 /// Resolves report paths and validates that every configured root was measured.
 ///
 /// Runs Cargo metadata and checks configured package paths through the plan.
 /// Root matching precedes exemptions, so exempt files still prove their source
-/// root was measured. Returns an error for an invalid plan or an unmatched root.
-fn select_files(
-    project: &Path,
-    config: &Config,
-    files: Vec<CoverageRecord>,
-) -> Result<Vec<CoverageRecord>> {
+/// root was measured. Returns an error for an invalid plan or an unmatched
+/// root.
+fn select_files(project: &Path, config: &Config, files: Vec<CoverageRecord>) -> Result<Vec<CoverageRecord>> {
     let plan = CoveragePlan::load(project, config)?;
     let paths: Vec<_> = files
         .iter()
         .map(|file| plan.report_path(&file.coverage.filename))
         .collect();
     for root in &plan.roots {
-        if !paths
-            .iter()
-            .any(|path| path.starts_with(root) && path != root)
-        {
+        if !paths.iter().any(|path| path.starts_with(root) && path != root) {
             bail!("source root '{}' matched no coverage files", root.display());
         }
     }
@@ -478,10 +451,7 @@ fn select_files(
         .into_iter()
         .zip(paths)
         .filter(|(_, path)| {
-            plan.roots
-                .iter()
-                .any(|root| path.starts_with(root) && path != root)
-                && !plan.exemptions.contains(path)
+            plan.roots.iter().any(|root| path.starts_with(root) && path != root) && !plan.exemptions.contains(path)
         })
         .map(|(file, _)| file)
         .collect())
@@ -551,11 +521,7 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
                     *percent < threshold
                 }
             }) {
-                let operator = if matches!(name, "lines" | "regions") {
-                    "<="
-                } else {
-                    "<"
-                };
+                let operator = if matches!(name, "lines" | "regions") { "<=" } else { "<" };
                 failures.push(format!("{name} {operator} {threshold:.2} ({percent:.2}%)"));
             } else if percent.is_none() {
                 failures.push(format!("{name} counts unavailable"));
@@ -574,7 +540,8 @@ fn report_files(files: &[CoverageRecord]) {
     print!("{}", coverage_summary(files));
 }
 
-/// Builds the source-file coverage table shown by collection and check commands.
+/// Builds the source-file coverage table shown by collection and check
+/// commands.
 fn coverage_summary(files: &[CoverageRecord]) -> String {
     let mut output = String::from("Coverage summary:\n");
     use std::fmt::Write;
@@ -622,11 +589,7 @@ fn shorten_path(path: &str, max_length: usize) -> String {
     if path.chars().count() <= max_length {
         return path.to_owned();
     }
-    let suffix: String = path
-        .chars()
-        .rev()
-        .take(max_length.saturating_sub(3))
-        .collect();
+    let suffix: String = path.chars().rev().take(max_length.saturating_sub(3)).collect();
     format!("...{}", suffix.chars().rev().collect::<String>())
 }
 
@@ -648,11 +611,7 @@ fn report_thresholds(thresholds: &Thresholds, files: &[CoverageRecord], passed: 
                 .fold((0_u64, 0_u64), |(covered, count), metric| {
                     (covered + metric.covered, count + metric.count)
                 });
-            let operator = if matches!(name, "lines" | "regions") {
-                ">"
-            } else {
-                ">="
-            };
+            let operator = if matches!(name, "lines" | "regions") { ">" } else { ">=" };
             if count == 0 {
                 println!("  {name}: {operator} {threshold:.2}% (actual n/a)");
             } else {
@@ -691,18 +650,9 @@ mod tests {
                 regions_percent: Some(85.0),
                 branches_percent: None,
             },
-            lines: Some(MetricCounts {
-                covered: 9,
-                count: 10,
-            }),
-            functions: Some(MetricCounts {
-                covered: 19,
-                count: 20,
-            }),
-            regions: Some(MetricCounts {
-                covered: 17,
-                count: 20,
-            }),
+            lines: Some(MetricCounts { covered: 9, count: 10 }),
+            functions: Some(MetricCounts { covered: 19, count: 20 }),
+            regions: Some(MetricCounts { covered: 17, count: 20 }),
             branches: None,
         }];
 
@@ -719,9 +669,7 @@ mod tests {
     #[test]
     fn rejects_invalid_source_path() {
         let config = Config {
-            source_dirs: [("pkg".into(), vec!["../src".into()])]
-                .into_iter()
-                .collect(),
+            source_dirs: [("pkg".into(), vec!["../src".into()])].into_iter().collect(),
             ..Config::default()
         };
         assert!(validate_config(&config).is_err());
@@ -778,10 +726,7 @@ mod tests {
         .unwrap();
 
         let error = check(project, &config, &input).expect_err("partial counts must fail");
-        assert!(
-            error.to_string().contains("lines counts unavailable"),
-            "{error:#}"
-        );
+        assert!(error.to_string().contains("lines counts unavailable"), "{error:#}");
     }
 
     #[test]
@@ -793,10 +738,7 @@ mod tests {
             r#"{"data":[{"files":[{"filename":"src/lib.rs","summary":{"lines":{"percent":91.0}}}]}]}"#,
         )
         .unwrap();
-        assert_eq!(
-            read_files(&input).unwrap()[0].coverage.lines_percent,
-            Some(91.0)
-        );
+        assert_eq!(read_files(&input).unwrap()[0].coverage.lines_percent, Some(91.0));
     }
 
     #[test]
@@ -838,11 +780,7 @@ mod tests {
     #[test]
     fn builds_stable_collection_arguments() {
         let directory = tempfile::tempdir().unwrap();
-        fs::write(
-            directory.path().join("Cargo.toml"),
-            "[package]\nname = \"demo\"\n",
-        )
-        .unwrap();
+        fs::write(directory.path().join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
         fs::create_dir_all(directory.path().join("src")).expect("source root");
         fs::write(directory.path().join("src/lib.rs"), "").expect("library target");
         let config = Config {
@@ -869,9 +807,6 @@ mod tests {
         let legacy = directory.path().join(".rs-ci-coverage.json");
         fs::write(&legacy, "{}").unwrap();
         let modern = directory.path().join(".infra/ci/coverage.json");
-        assert_eq!(
-            resolve_config_path(directory.path(), &modern).unwrap(),
-            legacy
-        );
+        assert_eq!(resolve_config_path(directory.path(), &modern).unwrap(), legacy);
     }
 }

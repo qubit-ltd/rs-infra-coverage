@@ -43,47 +43,31 @@ fn record(path: &str, lines: u64, functions: u64, regions: u64) -> Value {
 /// Writes a configuration and report and returns the public check result.
 fn evaluate(root: &Path, config: Value, files: Vec<Value>) -> anyhow::Result<()> {
     fs::write(root.join("coverage.json"), config.to_string()).expect("configuration");
-    fs::write(
-        root.join("report.json"),
-        json!({"data":[{"files":files}]}).to_string(),
-    )
-    .expect("coverage report");
+    fs::write(root.join("report.json"), json!({"data":[{"files":files}]}).to_string()).expect("coverage report");
     check(root, &root.join("coverage.json"), &root.join("report.json"))
 }
 
 #[test]
 fn test_lines_equal_threshold_fail() {
     let project = project();
-    let error = evaluate(
-        project.path(),
-        json!({}),
-        vec![record("src/lib.rs", 90, 100, 100)],
-    )
-    .expect_err("exactly 90 percent lines must fail");
+    let error = evaluate(project.path(), json!({}), vec![record("src/lib.rs", 90, 100, 100)])
+        .expect_err("exactly 90 percent lines must fail");
     assert!(error.to_string().contains("lines"), "{error:#}");
 }
 
 #[test]
 fn test_regions_equal_threshold_fail() {
     let project = project();
-    let error = evaluate(
-        project.path(),
-        json!({}),
-        vec![record("src/lib.rs", 100, 100, 85)],
-    )
-    .expect_err("exactly 85 percent regions must fail");
+    let error = evaluate(project.path(), json!({}), vec![record("src/lib.rs", 100, 100, 85)])
+        .expect_err("exactly 85 percent regions must fail");
     assert!(error.to_string().contains("regions"), "{error:#}");
 }
 
 #[test]
 fn test_functions_equal_threshold_pass() {
     let project = project();
-    evaluate(
-        project.path(),
-        json!({}),
-        vec![record("src/lib.rs", 91, 95, 86)],
-    )
-    .expect("functions threshold is inclusive");
+    evaluate(project.path(), json!({}), vec![record("src/lib.rs", 91, 95, 86)])
+        .expect("functions threshold is inclusive");
 }
 
 #[test]
@@ -95,10 +79,7 @@ fn test_empty_thresholds_keep_defaults() {
         vec![record("src/lib.rs", 0, 0, 0)],
     )
     .expect_err("empty thresholds cannot disable checks");
-    assert!(
-        error.to_string().contains("coverage thresholds failed"),
-        "{error:#}"
-    );
+    assert!(error.to_string().contains("coverage thresholds failed"), "{error:#}");
 }
 
 #[test]
@@ -140,12 +121,8 @@ fn test_unknown_packages_are_rejected() {
         json!({"threshold_exempt_files":{"unknown":["src/lib.rs"]}}),
         json!({"exclude_packages":["unknown"]}),
     ] {
-        let error = evaluate(
-            project.path(),
-            config,
-            vec![record("src/lib.rs", 100, 100, 100)],
-        )
-        .expect_err("unknown package must fail");
+        let error = evaluate(project.path(), config, vec![record("src/lib.rs", 100, 100, 100)])
+            .expect_err("unknown package must fail");
         assert!(error.to_string().contains("unknown package"), "{error:#}");
     }
 }
@@ -157,12 +134,8 @@ fn test_missing_configured_paths_are_rejected() {
         json!({"source_dirs":{"demo":["src","missing"]}}),
         json!({"threshold_exempt_files":{"demo":["missing.rs"]}}),
     ] {
-        let error = evaluate(
-            project.path(),
-            config,
-            vec![record("src/lib.rs", 100, 100, 100)],
-        )
-        .expect_err("missing path must fail");
+        let error = evaluate(project.path(), config, vec![record("src/lib.rs", 100, 100, 100)])
+            .expect_err("missing path must fail");
         assert!(error.to_string().contains("does not exist"), "{error:#}");
     }
 }
@@ -175,14 +148,7 @@ fn test_empty_and_duplicate_path_lists_are_rejected() {
         json!({"source_dirs":{"demo":["src","src"]}}),
         json!({"threshold_exempt_files":{"demo":["src/lib.rs","src/lib.rs"]}}),
     ] {
-        assert!(
-            evaluate(
-                project.path(),
-                config,
-                vec![record("src/lib.rs", 100, 100, 100)]
-            )
-            .is_err()
-        );
+        assert!(evaluate(project.path(), config, vec![record("src/lib.rs", 100, 100, 100)]).is_err());
     }
 }
 
@@ -199,12 +165,9 @@ fn test_workspace_exemptions_only_match_the_named_package() {
         record("member/src/lib.rs", 0, 0, 0),
     ];
     let config = json!({"scope":"workspace","threshold_exempt_files":{"demo":["src/lib.rs"]}});
-    let error = evaluate(project.path(), config, files)
-        .expect_err("member's file must not be exempted by a suffix match");
-    assert!(
-        error.to_string().contains("coverage thresholds failed"),
-        "{error:#}"
-    );
+    let error =
+        evaluate(project.path(), config, files).expect_err("member's file must not be exempted by a suffix match");
+    assert!(error.to_string().contains("coverage thresholds failed"), "{error:#}");
 }
 
 #[test]
@@ -213,9 +176,7 @@ fn test_workspace_source_paths_are_package_relative() {
     package(&project.path().join("member"), "member");
     let manifest = project.path().join("Cargo.toml");
     let mut text = fs::read_to_string(&manifest).expect("manifest");
-    text.push_str(
-        "\n[workspace]\nmembers = [\"member\"]\ndefault-members = [\"member\"]\nresolver = \"3\"\n",
-    );
+    text.push_str("\n[workspace]\nmembers = [\"member\"]\ndefault-members = [\"member\"]\nresolver = \"3\"\n");
     fs::write(manifest, text).expect("workspace manifest");
     evaluate(
         project.path(),
@@ -229,10 +190,7 @@ fn test_workspace_source_paths_are_package_relative() {
         vec![record("src/lib.rs", 100, 100, 100)],
     )
     .expect_err("non-default package must be rejected");
-    assert!(
-        error.to_string().contains("unselected package"),
-        "{error:#}"
-    );
+    assert!(error.to_string().contains("unselected package"), "{error:#}");
 }
 
 #[test]
@@ -247,22 +205,15 @@ fn test_virtual_workspace_roots_and_exclusions() {
     )
     .expect("virtual manifest");
     let config = json!({"scope":"workspace","exclude_packages":["second"]});
-    evaluate(
-        root,
-        config,
-        vec![record("first/src/lib.rs", 100, 100, 100)],
-    )
-    .expect("excluded package requires no report hits");
+    evaluate(root, config, vec![record("first/src/lib.rs", 100, 100, 100)])
+        .expect("excluded package requires no report hits");
     let error = evaluate(
         root,
         json!({"scope":"package"}),
         vec![record("first/src/lib.rs", 100, 100, 100)],
     )
     .expect_err("virtual workspace has no root package");
-    assert!(
-        error.to_string().contains("scope contains no packages"),
-        "{error:#}"
-    );
+    assert!(error.to_string().contains("scope contains no packages"), "{error:#}");
     let error = evaluate(
         root,
         json!({"scope":"workspace","exclude_packages":["second"],
@@ -270,10 +221,7 @@ fn test_virtual_workspace_roots_and_exclusions() {
         vec![record("first/src/lib.rs", 100, 100, 100)],
     )
     .expect_err("excluded package cannot configure exemptions");
-    assert!(
-        error.to_string().contains("unselected package 'second'"),
-        "{error:#}"
-    );
+    assert!(error.to_string().contains("unselected package 'second'"), "{error:#}");
 }
 
 #[test]
@@ -305,10 +253,7 @@ fn test_source_roots_do_not_match_sibling_prefixes() {
         vec![record("src/extra_suffix/item.rs", 100, 100, 100)],
     )
     .expect_err("directory names require component boundaries");
-    assert!(
-        error.to_string().contains("matched no coverage files"),
-        "{error:#}"
-    );
+    assert!(error.to_string().contains("matched no coverage files"), "{error:#}");
 }
 
 #[test]
@@ -323,21 +268,14 @@ fn test_invalid_path_kinds_and_empty_scope_fail() {
             json!({"threshold_exempt_files":{"demo":["src"]}}),
             "exemption file does not exist",
         ),
-        (
-            json!({"exclude_packages":["demo"]}),
-            "scope contains no packages",
-        ),
+        (json!({"exclude_packages":["demo"]}), "scope contains no packages"),
         (
             json!({"exclude_packages":["demo","demo"]}),
             "must not contain duplicates",
         ),
     ] {
-        let error = evaluate(
-            project.path(),
-            config,
-            vec![record("src/lib.rs", 100, 100, 100)],
-        )
-        .expect_err("invalid policy must fail");
+        let error = evaluate(project.path(), config, vec![record("src/lib.rs", 100, 100, 100)])
+            .expect_err("invalid policy must fail");
         assert!(error.to_string().contains(message), "{error:#}");
     }
 }

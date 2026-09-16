@@ -6,7 +6,8 @@
 //    Licensed under the Apache License, Version 2.0.
 // =============================================================================
 
-//! Resolves coverage scope and configured paths against Cargo workspace metadata.
+//! Resolves coverage scope and configured paths against Cargo workspace
+//! metadata.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -41,9 +42,7 @@ impl CoveragePlan {
     /// Returns an error for invalid metadata, unknown/unselected packages, an
     /// empty scope, missing paths, or duplicate canonical source directories.
     pub(crate) fn load(project: &Path, config: &Config) -> Result<Self> {
-        let project = project
-            .canonicalize()
-            .context("cannot resolve project directory")?;
+        let project = project.canonicalize().context("cannot resolve project directory")?;
         let output = Command::new("cargo")
             .args(["metadata", "--no-deps", "--format-version", "1"])
             .arg("--manifest-path")
@@ -52,13 +51,9 @@ impl CoveragePlan {
             .output()
             .context("failed to start cargo metadata")?;
         if !output.status.success() {
-            bail!(
-                "cargo metadata failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            bail!("cargo metadata failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        let metadata: Value =
-            serde_json::from_slice(&output.stdout).context("invalid cargo metadata JSON")?;
+        let metadata: Value = serde_json::from_slice(&output.stdout).context("invalid cargo metadata JSON")?;
         let members = metadata["workspace_members"]
             .as_array()
             .context("cargo metadata has no workspace_members")?;
@@ -83,9 +78,7 @@ impl CoveragePlan {
                     .context("package has no manifest_path")?,
             )
             .canonicalize()?;
-            let root = package_manifest
-                .parent()
-                .context("manifest has no parent")?;
+            let root = package_manifest.parent().context("manifest has no parent")?;
             package_roots.insert(name.to_owned(), root.to_path_buf());
             let included = match scope {
                 "workspace" => true,
@@ -93,12 +86,7 @@ impl CoveragePlan {
                 "package" => package_manifest == manifest,
                 _ => bail!("unsupported coverage scope: {scope}"),
             };
-            if included
-                && !config
-                    .exclude_packages
-                    .iter()
-                    .any(|excluded| excluded == name)
-            {
+            if included && !config.exclude_packages.iter().any(|excluded| excluded == name) {
                 selected.insert(name.to_owned());
             }
         }
@@ -112,19 +100,13 @@ impl CoveragePlan {
                 bail!("coverage configuration names unknown package '{name}'");
             }
         }
-        for name in config
-            .source_dirs
-            .keys()
-            .chain(config.threshold_exempt_files.keys())
-        {
+        for name in config.source_dirs.keys().chain(config.threshold_exempt_files.keys()) {
             if !selected.contains(name) {
                 bail!("coverage configuration refers to unselected package '{name}'");
             }
         }
         if selected.is_empty() {
-            bail!(
-                "selected coverage scope contains no packages (package scope requires a package root)"
-            );
+            bail!("selected coverage scope contains no packages (package scope requires a package root)");
         }
         let mut plan = Self {
             cargo_args: Vec::new(),
@@ -149,12 +131,7 @@ impl CoveragePlan {
                 }
                 plan.roots.push(path);
             }
-            for file in config
-                .threshold_exempt_files
-                .get(name)
-                .into_iter()
-                .flatten()
-            {
+            for file in config.threshold_exempt_files.get(name).into_iter().flatten() {
                 let path = root.join(file);
                 if !path.is_file() {
                     bail!(
@@ -167,17 +144,12 @@ impl CoveragePlan {
         }
         if scope == "package" {
             for name in &selected {
-                plan.cargo_args
-                    .extend(["--package".to_owned(), name.clone()]);
+                plan.cargo_args.extend(["--package".to_owned(), name.clone()]);
             }
         } else {
             plan.cargo_args.push("--workspace".to_owned());
-            for name in package_roots
-                .keys()
-                .filter(|name| !selected.contains(*name))
-            {
-                plan.cargo_args
-                    .extend(["--exclude".to_owned(), name.clone()]);
+            for name in package_roots.keys().filter(|name| !selected.contains(*name)) {
+                plan.cargo_args.extend(["--exclude".to_owned(), name.clone()]);
             }
         }
         Ok(plan)
