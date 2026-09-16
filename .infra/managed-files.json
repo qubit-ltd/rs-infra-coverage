@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "managed": [
+    ".github/workflows/ci.yml",
+    ".gitignore",
+    ".infra/ci.toml",
+    ".infra/ci/cargo-matrix.json",
+    ".infra/ci/pages.json",
+    ".infra/ci/tools.toml",
+    ".infra/dep/policy.toml",
+    ".infra/style/exceptions.toml",
+    ".infra/style/rustfmt.toml",
+    ".infra/tools/coverage-report.sh",
+    ".infra/tools/dependency-update.sh",
+    ".infra/tools/infra-tool.sh",
+    "align-ci.sh",
+    "ci-check.sh",
+    "coverage.sh",
+    "dependency-update.sh",
+    "style-check.sh"
+  ]
+}
