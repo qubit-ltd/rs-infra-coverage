@@ -79,17 +79,17 @@ fn main() {
             let status = error.exit_code();
             let _ = error.print();
             if status == 0 {
-                println!("rs-infra-coverage: help succeeded");
+                println!("✅ rs-infra-coverage: help succeeded");
             } else {
-                eprintln!("rs-infra-coverage: failed (exit code {status})");
+                eprintln!("❌ rs-infra-coverage: failed (exit code {status})");
             }
             process::exit(status);
         }
     };
     match run(cli) {
-        Ok(command) => println!("rs-infra-coverage: {command} succeeded"),
+        Ok(command) => println!("✅ rs-infra-coverage: {command} succeeded"),
         Err(error) => {
-            eprintln!("rs-infra-coverage: failed: {error:#}");
+            eprintln!("❌ rs-infra-coverage: failed: {error:#}");
             process::exit(1);
         }
     }
