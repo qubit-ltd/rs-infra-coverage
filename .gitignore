@@ -1,2 +1,4 @@
 /target/
-/.infra/tools/bin/
+/.infra/*/bin/
+/.infra/*/.crates*
+/.infra/*/tool.revision*
