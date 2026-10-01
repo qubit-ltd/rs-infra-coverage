@@ -12,3 +12,31 @@ elif [ -f "$project_root/rustfmt.toml" ]; then
 fi
 "$project_root/.infra/bin/prepare-local-path-dependencies.sh"
 "$project_root/.infra/bin/infra-tool.sh" rs-infra-ci --project "$project_root" "$@" check
+
+coverage_selected=true
+explicit_only=false
+for ((index = 1; index <= $#; index++)); do
+    argument=${!index}
+    if [ "$argument" = "--only" ]; then
+        explicit_only=true
+        next_index=$((index + 1))
+        selected_tasks=${!next_index:-}
+        break
+    elif [[ "$argument" == --only=* ]]; then
+        explicit_only=true
+        selected_tasks=${argument#--only=}
+        break
+    fi
+done
+if [ "$explicit_only" = true ]; then
+    coverage_selected=false
+    IFS=',' read -r -a selected_task_list <<< "$selected_tasks"
+    for task in "${selected_task_list[@]}"; do
+        if [ "$task" = coverage ]; then
+            coverage_selected=true
+        fi
+    done
+fi
+if [ "$coverage_selected" = true ] && [ -f "$project_root/target/infra/coverage/raw.json" ]; then
+    "$project_root/.infra/lib/coverage-report.sh"
+fi
