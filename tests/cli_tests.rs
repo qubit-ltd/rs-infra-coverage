@@ -1,3 +1,11 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 //! Regression tests for CLI completion summaries.
 
 use std::fs;
@@ -5,6 +13,7 @@ use std::process::Command;
 
 use serde_json::json;
 use tempfile::TempDir;
+use tempfile::tempdir;
 
 fn run(arguments: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_rs-infra-coverage"))
@@ -14,7 +23,7 @@ fn run(arguments: &[&str]) -> std::process::Output {
 }
 
 fn project() -> TempDir {
-    let directory = tempfile::tempdir().expect("temporary project");
+    let directory = tempdir().expect("temporary project");
     fs::create_dir_all(directory.path().join(".infra/ci")).expect("configuration directory");
     fs::create_dir_all(directory.path().join("src")).expect("source directory");
     fs::write(

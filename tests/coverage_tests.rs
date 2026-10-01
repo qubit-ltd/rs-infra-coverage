@@ -1,19 +1,29 @@
+// =============================================================================
+//    Copyright (c) 2025 - 2026 Haixing Hu.
+//
+//    SPDX-License-Identifier: Apache-2.0
+//
+//    Licensed under the Apache License, Version 2.0.
+// =============================================================================
+
 //! Regression tests for the legacy coverage policy through the public API.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::Result;
 use qubit_infra_coverage::check;
 use qubit_infra_coverage::load_config;
 use qubit_infra_coverage::report;
 use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
+use tempfile::tempdir;
 
 /// Creates a dependency-free Cargo project with two real source directories.
 fn project() -> TempDir {
-    let directory = tempfile::tempdir().expect("temporary project");
+    let directory = tempdir().expect("temporary project");
     package(directory.path(), "demo");
     fs::create_dir_all(directory.path().join("src/extra")).expect("extra source root");
     fs::write(directory.path().join("src/extra/item.rs"), "").expect("extra source file");
@@ -41,7 +51,7 @@ fn record(path: &str, lines: u64, functions: u64, regions: u64) -> Value {
 }
 
 /// Writes a configuration and report and returns the public check result.
-fn evaluate(root: &Path, config: Value, files: Vec<Value>) -> anyhow::Result<()> {
+fn evaluate(root: &Path, config: Value, files: Vec<Value>) -> Result<()> {
     fs::write(root.join("coverage.json"), config.to_string()).expect("configuration");
     fs::write(root.join("report.json"), json!({"data":[{"files":files}]}).to_string()).expect("coverage report");
     check(root, &root.join("coverage.json"), &root.join("report.json"))
@@ -195,7 +205,7 @@ fn test_workspace_source_paths_are_package_relative() {
 
 #[test]
 fn test_virtual_workspace_roots_and_exclusions() {
-    let directory = tempfile::tempdir().expect("workspace");
+    let directory = tempdir().expect("workspace");
     let root = directory.path();
     package(&root.join("first"), "first");
     package(&root.join("second"), "second");
