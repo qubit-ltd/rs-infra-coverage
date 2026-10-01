@@ -18,6 +18,7 @@ use clap::Subcommand;
 use qubit_infra_coverage::check;
 use qubit_infra_coverage::clippy;
 use qubit_infra_coverage::collect;
+use qubit_infra_coverage::collect_with_threshold_policy;
 use qubit_infra_coverage::report;
 use qubit_infra_coverage::resolve_config_path;
 
@@ -44,6 +45,9 @@ enum Command {
         /// Optional output path for the raw report.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Report threshold shortfalls without failing the collection.
+        #[arg(long)]
+        ignore_thresholds: bool,
     },
     /// Validate a coverage report against configured thresholds.
     Check {
@@ -105,8 +109,15 @@ fn run(cli: Cli) -> Result<&'static str> {
     };
     let config_path = resolve_config_path(&project, &configured_path)?;
     let command = match cli.command {
-        Command::Collect { output } => {
-            collect(&project, &config_path, output.as_deref())?;
+        Command::Collect {
+            output,
+            ignore_thresholds,
+        } => {
+            if ignore_thresholds {
+                collect_with_threshold_policy(&project, &config_path, output.as_deref(), false)?;
+            } else {
+                collect(&project, &config_path, output.as_deref())?;
+            }
             "collect"
         }
         Command::Check { input } => {

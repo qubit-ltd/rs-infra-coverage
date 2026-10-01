@@ -108,6 +108,25 @@ pub fn resolve_config_path(project: &Path, configured: &Path) -> Result<PathBuf>
 /// startup, Cargo metadata/path validation, collection, report parsing, or
 /// threshold checking fails.
 pub fn collect(project: &Path, config_path: &Path, output: Option<&Path>) -> Result<()> {
+    collect_with_threshold_policy(project, config_path, output, true)
+}
+
+/// Collects and reports coverage while optionally enforcing thresholds.
+///
+/// The report is still parsed and validated when `enforce_thresholds` is false;
+/// only a shortfall against the configured percentages is allowed to succeed.
+/// The resulting shortfall is printed for callers that summarize migrations.
+///
+/// # Errors
+///
+/// Returns an error for invalid configuration, collection or report failures,
+/// and for threshold shortfalls when `enforce_thresholds` is true.
+pub fn collect_with_threshold_policy(
+    project: &Path,
+    config_path: &Path,
+    output: Option<&Path>,
+    enforce_thresholds: bool,
+) -> Result<()> {
     let config = load_config(config_path)?;
     let default_output = project.join("target/infra/coverage/raw.json");
     let output = output.unwrap_or(&default_output);
@@ -124,7 +143,7 @@ pub fn collect(project: &Path, config_path: &Path, output: Option<&Path>) -> Res
     if !status.success() {
         bail!("cargo llvm-cov failed");
     }
-    check(project, config_path, output)
+    check_with_threshold_policy(project, config_path, output, enforce_thresholds)
 }
 
 /// Runs Clippy with the configured optional coverage cfg flag.
@@ -205,6 +224,19 @@ fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
 /// * `config_path` - The coverage configuration file to load.
 /// * `input` - The LLVM coverage JSON report to read.
 pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
+    check_with_threshold_policy(project, config_path, input, true)
+}
+
+/// Parses and reports coverage, allowing a caller to ignore percentage gaps.
+///
+/// Invalid configuration, missing source files, and malformed reports remain
+/// errors regardless of `enforce_thresholds`.
+fn check_with_threshold_policy(
+    project: &Path,
+    config_path: &Path,
+    input: &Path,
+    enforce_thresholds: bool,
+) -> Result<()> {
     let config = load_config(config_path)?;
     let selected = select_files(project, &config, read_files(input)?)?;
     if selected.is_empty() {
@@ -214,7 +246,11 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
     let failures = threshold_failures(&config.thresholds, &selected);
     if !failures.is_empty() {
         report_thresholds(&config.thresholds, &selected, false);
-        bail!("coverage thresholds failed: {}", failures.join(", "));
+        if enforce_thresholds {
+            bail!("coverage thresholds failed: {}", failures.join(", "));
+        }
+        println!("Coverage thresholds failed (ignored): {}", failures.join(", "));
+        return Ok(());
     }
     report_thresholds(&config.thresholds, &selected, true);
     Ok(())
@@ -639,10 +675,14 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    use serde_json::json;
+    use tempfile::tempdir;
+
     use super::Config;
     use super::CoverageRecord;
     use super::MetricCounts;
     use super::check;
+    use super::check_with_threshold_policy;
     use super::collection_args;
     use super::coverage_summary;
     use super::load_config;
@@ -650,6 +690,37 @@ mod tests {
     use super::resolve_config_path;
     use super::validate_config;
     use crate::file_coverage::FileCoverage;
+
+    /// Confirms only percentage shortfalls are allowed by the collection
+    /// policy.
+    #[test]
+    fn test_ignored_thresholds_keep_report_validation() {
+        let project = tempdir().expect("temporary project");
+        fs::create_dir_all(project.path().join("src")).expect("source directory");
+        fs::write(
+            project.path().join("Cargo.toml"),
+            "[package]\nname = \"coverage-policy\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .expect("package manifest");
+        fs::write(project.path().join("src/lib.rs"), "").expect("source file");
+        let report = project.path().join("report.json");
+        fs::write(
+            &report,
+            json!({"data":[{"files":[{"filename":"src/lib.rs","summary":{
+                "lines":{"covered":80,"count":100,"percent":80.0},
+                "functions":{"covered":80,"count":100,"percent":80.0},
+                "regions":{"covered":80,"count":100,"percent":80.0}
+            }}]}]})
+            .to_string(),
+        )
+        .expect("coverage report");
+        let config = project.path().join("missing-config.json");
+        assert!(check_with_threshold_policy(project.path(), &config, &report, true).is_err());
+        check_with_threshold_policy(project.path(), &config, &report, false)
+            .expect("percentage shortfall should be reported without failing");
+        fs::write(&report, "not JSON").expect("invalid coverage report");
+        assert!(check_with_threshold_policy(project.path(), &config, &report, false).is_err());
+    }
 
     #[test]
     fn coverage_summary_prints_file_metrics_with_counts_and_missing_values() {

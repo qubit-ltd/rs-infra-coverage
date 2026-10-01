@@ -20,6 +20,7 @@ pub use config::Config;
 pub use coverage::check;
 pub use coverage::clippy;
 pub use coverage::collect;
+pub use coverage::collect_with_threshold_policy;
 pub use coverage::load_config;
 pub use coverage::report;
 pub use coverage::resolve_config_path;
