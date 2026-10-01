@@ -23,5 +23,5 @@ jobs:
           toolchain: 1.94.0
       - name: Install pinned nightly components
         run: rustup toolchain install nightly-2026-06-05 --profile minimal --component rustfmt --component clippy
-      - run: ./align-ci.sh
-      - run: ./ci-check.sh
+      - run: ./.infra/bin/align-ci.sh
+      - run: ./.infra/bin/ci-check.sh
