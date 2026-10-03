@@ -54,40 +54,29 @@ pub fn load_config(path: &Path) -> Result<Config> {
     Ok(config)
 }
 
-/// Resolves the configured coverage file, including the legacy fallback.
+/// Resolves a relative coverage configuration path against the project root.
 ///
-/// If `configured` is missing and is the modern project path, an existing
-/// `.rs-ci-coverage.json` is selected and a migration warning is printed.
-/// This function does not read or modify either configuration file.
+/// This function does not check whether the file exists. A missing file is
+/// handled by [`load_config`], which uses the default coverage settings.
 ///
 /// # Parameters
 ///
-/// * `project` - The project root used to locate the fallback.
+/// * `project` - The project root used to resolve a relative path.
 /// * `configured` - The configured path, absolute or project-relative.
 ///
 /// # Returns
 ///
-/// The existing configured path or the legacy fallback path.
+/// The absolute configured path, or the path joined to `project`.
 ///
 /// # Errors
 ///
 /// This function currently returns no operational errors; the result type is
 /// kept consistent with the public command API.
 pub fn resolve_config_path(project: &Path, configured: &Path) -> Result<PathBuf> {
-    if configured.is_file() {
+    if configured.is_absolute() {
         return Ok(configured.to_path_buf());
     }
-    let modern = project.join(".infra/ci/coverage.json");
-    let legacy = project.join(".rs-ci-coverage.json");
-    if configured == modern && legacy.is_file() {
-        eprintln!(
-            "warning: using legacy coverage configuration {}; migrate to {}",
-            legacy.display(),
-            modern.display()
-        );
-        return Ok(legacy);
-    }
-    Ok(configured.to_path_buf())
+    Ok(project.join(configured))
 }
 
 /// Collects LLVM coverage data and checks the resulting report.
@@ -905,12 +894,13 @@ mod tests {
     }
 
     #[test]
-    fn resolves_legacy_config_when_modern_config_is_missing() {
+    fn resolves_relative_config_path_against_project_root() {
         let directory = tempfile::tempdir().unwrap();
-        fs::create_dir_all(directory.path().join(".infra/ci")).unwrap();
-        let legacy = directory.path().join(".rs-ci-coverage.json");
-        fs::write(&legacy, "{}").unwrap();
-        let modern = directory.path().join(".infra/ci/coverage.json");
-        assert_eq!(resolve_config_path(directory.path(), &modern).unwrap(), legacy);
+        let configured = Path::new(".infra/coverage/coverage.json");
+
+        assert_eq!(
+            resolve_config_path(directory.path(), configured).unwrap(),
+            directory.path().join(configured)
+        );
     }
 }

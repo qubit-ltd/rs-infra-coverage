@@ -30,7 +30,7 @@ struct Cli {
     #[arg(long, default_value = ".")]
     project: PathBuf,
     /// Coverage configuration path, relative to the project unless absolute.
-    #[arg(long, default_value = ".infra/ci/coverage.json")]
+    #[arg(long, default_value = ".infra/coverage/coverage.json")]
     config: PathBuf,
     /// Operation to perform.
     #[command(subcommand)]
@@ -102,12 +102,7 @@ fn main() {
 /// Parses arguments and executes the selected command.
 fn run(cli: Cli) -> Result<&'static str> {
     let project = fs::canonicalize(&cli.project)?;
-    let configured_path = if cli.config.is_absolute() {
-        cli.config
-    } else {
-        project.join(cli.config)
-    };
-    let config_path = resolve_config_path(&project, &configured_path)?;
+    let config_path = resolve_config_path(&project, &cli.config)?;
     let command = match cli.command {
         Command::Collect {
             output,

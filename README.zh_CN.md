@@ -37,8 +37,8 @@ rs-infra-coverage --project . clippy --coverage-cfg
 
 `collect` 支持 `scope`（`default-members`、`workspace` 或 `package`）和
 `exclude_packages`。`check` 在排除 `threshold_exempt_files` 后应用配置的
-`thresholds`。如果不存在 `.infra/ci/coverage.json`，会兼容读取旧的
-`.rs-ci-coverage.json` 并输出迁移警告。
+`thresholds`。默认配置路径是 `.infra/coverage/coverage.json`。如果该文件
+不存在，则使用默认覆盖率设置。使用 `--config` 可以指定其他路径。
 
 当使用 `--coverage-cfg`、设置 `RUN_COVERAGE_CFG_CLIPPY=1`、配置
 `coverage_cfg_clippy: true` 或 `clippy.coverage_cfg: true` 时，Clippy 命令会

@@ -24,7 +24,7 @@ fn run(arguments: &[&str]) -> std::process::Output {
 
 fn project() -> TempDir {
     let directory = tempdir().expect("temporary project");
-    fs::create_dir_all(directory.path().join(".infra/ci")).expect("configuration directory");
+    fs::create_dir_all(directory.path().join(".infra/coverage")).expect("configuration directory");
     fs::create_dir_all(directory.path().join("src")).expect("source directory");
     fs::write(
         directory.path().join("Cargo.toml"),
@@ -32,7 +32,7 @@ fn project() -> TempDir {
     )
     .expect("manifest");
     fs::write(directory.path().join("src/lib.rs"), "").expect("source file");
-    fs::write(directory.path().join(".infra/ci/coverage.json"), "{}").expect("configuration");
+    fs::write(directory.path().join(".infra/coverage/coverage.json"), "{}").expect("configuration");
     fs::write(
         directory.path().join("coverage.json"),
         json!({"data":[{"files":[{"filename":"src/lib.rs","summary":{
@@ -69,4 +69,32 @@ fn cli_summaries_prefix_success_and_failure_with_status_icons() {
     let failure = run(&["--project", project_path, "report", "--input", missing_path]);
     assert!(!failure.status.success());
     assert!(String::from_utf8_lossy(&failure.stderr).contains("❌ rs-infra-coverage: failed:"));
+}
+
+#[test]
+fn cli_check_uses_the_coverage_directory_config_by_default() {
+    let project = project();
+    fs::create_dir_all(project.path().join(".infra/coverage")).expect("coverage configuration directory");
+    fs::write(
+        project.path().join(".infra/coverage/coverage.json"),
+        r#"{"thresholds":{"lines":80}}"#,
+    )
+    .expect("coverage configuration");
+    fs::write(
+        project.path().join("coverage.json"),
+        json!({"data":[{"files":[{"filename":"src/lib.rs","summary":{
+            "lines":{"covered":90,"count":100,"percent":90.0},
+            "functions":{"covered":95,"count":100,"percent":95.0},
+            "regions":{"covered":95,"count":100,"percent":95.0}
+        }}]}]})
+        .to_string(),
+    )
+    .expect("coverage report");
+
+    let project_path = project.path().to_str().expect("UTF-8 project path");
+    let report_path = project.path().join("coverage.json");
+    let report_path = report_path.to_str().expect("UTF-8 report path");
+    let output = run(&["--project", project_path, "check", "--input", report_path]);
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 }
