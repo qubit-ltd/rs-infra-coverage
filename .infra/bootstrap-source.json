@@ -1,0 +1,28 @@
+{
+  "config_sources": {
+    "rs-infra-dependency": "9ff4d0a45a17a1df0f02564e259ab61620412510",
+    "rs-infra-style": "0acb4f40a8fafe23e21d0bc9a68d9b8b48ba0c22"
+  },
+  "files": {
+    ".infra/dependency/policy.toml": {
+      "executable": false,
+      "sha256": "3424c292680fea6eba3f743943ba7280e9f3d2372fec3fe082fb6c931d20fabb"
+    },
+    ".infra/dependency/policy/baselines/v2026.10.06.1.txt": {
+      "executable": false,
+      "sha256": "537d6c14bc9f06ef1feb9f5dff72cf724fef3255ad568c9fb489d765f8affd9d"
+    },
+    ".infra/dependency/policy/current.toml": {
+      "executable": false,
+      "sha256": "87c8190a28c38355c351d8c346c11390bdff8ace6f8fce471c4af12ae26b289b"
+    },
+    ".infra/style/rustfmt.toml": {
+      "executable": false,
+      "sha256": "5b4a718d88723c2032a7057910f0f0fa49e7419437cbefef26bba8ca9b648b59"
+    }
+  },
+  "package_sha256": "db51442d5dabaa8a380f2432eaefece206b1084a2b5696e39a4c31a9d758b234",
+  "schema": 1,
+  "source_repository": "https://github.com/qubit-ltd/rs-infra-tools",
+  "source_revision": "fa74c7a4dc6ab4dcb2928279dff8e507858a1863"
+}
