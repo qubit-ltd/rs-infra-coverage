@@ -1,13 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-project_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+project_root=$script_dir
+while [[ ! -d "$project_root/.infra" && "$project_root" != / ]]; do
+    project_root=$(dirname "$project_root")
+done
+if [[ ! -d "$project_root/.infra" ]]; then
+    echo "error: unable to locate project .infra directory" >&2
+    exit 2
+fi
+python_cmd=${RS_INFRA_PYTHON:-}
+if [[ -z "$python_cmd" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+        python_cmd=python3
+    elif command -v python >/dev/null 2>&1; then
+        python_cmd=python
+    else
+        echo "error: Python 3 is required to manage bootstrap snapshots" >&2
+        exit 2
+    fi
+fi
+
 mode=${1:-}
-if [[ "$mode" != "" && "$mode" != --yes && "$mode" != --dry-run && "$mode" != --status && "$mode" != --check ]]; then
+if [[ "$mode" == --check ]]; then
+    exec "$python_cmd" "$project_root/.infra/bootstrap-check.py"
+fi
+if [[ "$mode" != "" && "$mode" != --yes && "$mode" != --dry-run && "$mode" != --status ]]; then
     echo "usage: ./update-infra.sh [--yes|--dry-run|--status|--check]" >&2
     exit 2
 fi
-python_cmd=${RS_INFRA_PYTHON:-python3}
+
 tmp_root=${TMPDIR:-/tmp}
 work=$(mktemp -d "$tmp_root/rs-infra-bootstrap.XXXXXX")
 printf '%s\n' 'rs-infra-bootstrap-temp-v1' > "$work/.rs-infra-bootstrap-temp"
@@ -28,4 +51,4 @@ fi
 exec "$python_cmd" "$work/source/assets/project-bootstrap/sync.py" \
     --project-root "$project_root" \
     --package-root "$work/source/assets/project-bootstrap" \
-    --configs-only "$@"
+    "$@"

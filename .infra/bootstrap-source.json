@@ -5,6 +5,46 @@
     "rs-infra-style": "sha256:f5ebba934dfcd04bb4b7a3847f27b8a73dcab28afbfe7cb2a9c2e884ebc4564c"
   },
   "files": {
+    ".infra/bin/align-ci.sh": {
+      "executable": true,
+      "sha256": "591c4848115d8d51f5fe52b5ec3f2f822f0b2024bd3c3250df8ba928120822af"
+    },
+    ".infra/bin/ci-check.sh": {
+      "executable": true,
+      "sha256": "e563cedf0ac12a9ed406850278b3ddec0b6dc27f5fedd492ac877d61843c3c84"
+    },
+    ".infra/bin/coverage.sh": {
+      "executable": true,
+      "sha256": "0e56dddddee87fd76477df4b615eab08b86b39f6a846811ce544f6469abbaf59"
+    },
+    ".infra/bin/dependency-update.sh": {
+      "executable": true,
+      "sha256": "26493d6575f669d43c685296cd743b5626a9667881d5ac9214698680f8a0dd40"
+    },
+    ".infra/bin/infra-tool.sh": {
+      "executable": true,
+      "sha256": "be0155a35a8781d0e800f03b5615652ca3e6f7ef346915709ed69c470b8a466e"
+    },
+    ".infra/bin/prepare-local-path-dependencies.sh": {
+      "executable": true,
+      "sha256": "d7a5d93c2bbda5405323d99391a34e45b49d8821d8808af3c4a25b8cfc79ff77"
+    },
+    ".infra/bin/project-ci-check.sh": {
+      "executable": true,
+      "sha256": "60643a95b295ec0c49b2bf74ea11bc8be55908adaee5d1655cd3124b325cd686"
+    },
+    ".infra/bin/style-check.sh": {
+      "executable": true,
+      "sha256": "0e322756544a21a3be83b2510b39590b008c52604fce0942ad7f1a6e563799a0"
+    },
+    ".infra/bootstrap-check.py": {
+      "executable": true,
+      "sha256": "3a7100044b18e00b2d92835c2a874fede98f0c1d909893f1959b2ff9ff0347a9"
+    },
+    ".infra/bootstrap.sh": {
+      "executable": true,
+      "sha256": "bd94dd3b7fcb3c446475f2ef6cd860108bab9b887d39bbeeb27380147d6b839c"
+    },
     ".infra/ci/defaults.toml": {
       "executable": false,
       "sha256": "ebf1a95d0a5ed70071987dbaa2413d1f2402f274e0d586a3924d8adbe9f1fb90"
@@ -24,10 +64,14 @@
     ".infra/style/rustfmt.toml": {
       "executable": false,
       "sha256": "5b4a718d88723c2032a7057910f0f0fa49e7419437cbefef26bba8ca9b648b59"
+    },
+    "update-infra.sh": {
+      "executable": true,
+      "sha256": "cb1256953d34f990dba04460ffb6869c910952bfecbddca95749ba1935e8579c"
     }
   },
   "package_sha256": "5c9b7f4bd31b0ee520bbc760967a89d10962c4b20dfcd15eec2501c381c67c67",
   "schema": 1,
   "source_repository": "https://github.com/qubit-ltd/rs-infra-tools",
-  "source_revision": "115756ed922edbfccffb78512fbdd0896a5a5331"
+  "source_revision": "bffba99abff6e1cf314a53953b6ab091eff21258"
 }
