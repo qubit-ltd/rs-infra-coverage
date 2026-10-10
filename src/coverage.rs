@@ -9,6 +9,7 @@
 //! Coverage data loading, filtering, collection, and reporting operations.
 
 use std::env;
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -92,6 +93,13 @@ pub fn resolve_config_path(project: &Path, configured: &Path) -> Result<PathBuf>
 /// * `output` - Optional report path; defaults to
 ///   `target/infra/coverage/raw.json`.
 ///
+/// # Parameters
+///
+/// * `project` - The project root in which Cargo is executed.
+/// * `config_path` - The coverage configuration file.
+/// * `output` - Optional report path; defaults to
+///   `target/infra/coverage/raw.json`.
+///
 /// # Errors
 ///
 /// Returns an error when configuration loading, directory creation, process
@@ -106,6 +114,13 @@ pub fn collect(project: &Path, config_path: &Path, output: Option<&Path>) -> Res
 /// The report is still parsed and validated when `enforce_thresholds` is false;
 /// only a shortfall against the configured percentages is allowed to succeed.
 /// The resulting shortfall is printed for callers that summarize migrations.
+///
+/// # Parameters
+///
+/// * `project` - The project root in which Cargo is executed.
+/// * `config_path` - The coverage configuration file.
+/// * `output` - Optional path for the generated LLVM coverage report.
+/// * `enforce_thresholds` - Whether coverage shortfalls should fail the call.
 ///
 /// # Errors
 ///
@@ -178,6 +193,16 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
 }
 
 /// Loads the configured Cargo toolchain from the shared defaults file.
+///
+/// # Parameters
+///
+/// * `project` - The project root containing `.infra/tools/defaults.toml`.
+/// * `field` - The toolchain key to read from the defaults file.
+///
+/// # Errors
+///
+/// Returns an error when the file is missing, unreadable, malformed, or does
+/// not contain a non-empty string for `field`.
 fn load_toolchain(project: &Path, field: &str) -> Result<String> {
     let path = project.join(".infra/tools/defaults.toml");
     match fs::symlink_metadata(&path) {
@@ -202,6 +227,10 @@ fn load_toolchain(project: &Path, field: &str) -> Result<String> {
 }
 
 /// Ensures a present defaults path resolves to a regular file.
+///
+/// # Errors
+///
+/// Returns an error when metadata cannot be read or the path is not a file.
 fn ensure_regular_file(path: &Path) -> Result<()> {
     let metadata =
         fs::metadata(path).with_context(|| format!("failed to inspect tool defaults path {}", path.display()))?;
@@ -227,6 +256,10 @@ fn ensure_regular_file(path: &Path) -> Result<()> {
 ///
 /// * `config` - The validated coverage configuration.
 /// * `project` - The project root containing the Cargo manifest.
+///
+/// # Returns
+///
+/// The Cargo subcommand and stable options required to collect coverage.
 fn collection_args(config: &Config, project: &Path) -> Result<Vec<String>> {
     let plan = CoveragePlan::load(project, config)?;
     let mut args = vec!["llvm-cov".into()];
@@ -261,6 +294,18 @@ pub fn check(project: &Path, config_path: &Path, input: &Path) -> Result<()> {
 ///
 /// Invalid configuration, missing source files, and malformed reports remain
 /// errors regardless of `enforce_thresholds`.
+///
+/// # Parameters
+///
+/// * `project` - The project root used to resolve package source roots.
+/// * `config_path` - The coverage configuration file.
+/// * `input` - The LLVM coverage JSON report.
+/// * `enforce_thresholds` - Whether threshold shortfalls should fail the call.
+///
+/// # Errors
+///
+/// Returns an error when configuration or report parsing fails, no files are
+/// selected, or enforced thresholds are not met.
 fn check_with_threshold_policy(
     project: &Path,
     config_path: &Path,
@@ -371,6 +416,14 @@ fn validate_config(config: &Config) -> Result<()> {
 }
 
 /// Returns whether a configuration list repeats a value, without modifying it.
+///
+/// # Parameters
+///
+/// * `values` - The ordered string values to inspect.
+///
+/// # Returns
+///
+/// `true` when a value appears more than once.
 fn has_duplicates(values: &[String]) -> bool {
     values
         .iter()
@@ -423,9 +476,11 @@ struct CoverageRecord {
 
 /// Selects one metric's counts from a coverage record.
 type MetricCountsGetter = fn(&CoverageRecord) -> Option<MetricCounts>;
+/// Selects one metric's displayed percentage from a coverage record.
 type MetricPercentGetter = fn(&CoverageRecord) -> Option<f64>;
 
 /// Reads covered and total counts from one LLVM metric object.
+/// Returns `None` when either count is absent or is not an unsigned integer.
 fn metric_counts(value: Option<&Value>) -> Option<MetricCounts> {
     let value = value?;
     Some(MetricCounts {
@@ -601,6 +656,7 @@ fn threshold_failures(thresholds: &Thresholds, files: &[CoverageRecord]) -> Vec<
 ///
 /// # Parameters
 ///
+/// * `project` - The project root used to shorten displayed source paths.
 /// * `files` - The selected coverage files whose metrics should be printed.
 fn report_files(project: &Path, files: &[CoverageRecord]) {
     print!("{}", coverage_summary(project, files));
@@ -608,9 +664,17 @@ fn report_files(project: &Path, files: &[CoverageRecord]) {
 
 /// Builds the source-file coverage table shown by collection and check
 /// commands.
+///
+/// # Parameters
+///
+/// * `project` - The project root used to shorten absolute source paths.
+/// * `files` - The selected file records to include in the table.
+///
+/// # Returns
+///
+/// A formatted table with a trailing newline.
 fn coverage_summary(project: &Path, files: &[CoverageRecord]) -> String {
     let mut output = String::from("Coverage summary:\n");
-    use std::fmt::Write;
 
     writeln!(
         output,
@@ -642,6 +706,16 @@ fn coverage_summary(project: &Path, files: &[CoverageRecord]) -> String {
 
 /// Converts an absolute report filename into a path relative to the project
 /// root for compact, stable coverage output.
+///
+/// # Parameters
+///
+/// * `project` - The project root to strip from the report filename.
+/// * `filename` - The report's source filename, which may be absolute.
+///
+/// # Returns
+///
+/// A lossy UTF-8 representation of the project-relative path when possible,
+/// otherwise the original path representation.
 fn display_source_path(project: &Path, filename: &str) -> String {
     Path::new(filename)
         .strip_prefix(project)
@@ -651,6 +725,15 @@ fn display_source_path(project: &Path, filename: &str) -> String {
 }
 
 /// Formats one coverage metric with its percentage and hit counts.
+///
+/// # Parameters
+///
+/// * `counts` - Covered and total item counts, when available.
+/// * `percentage` - The percentage reported by LLVM, when available.
+///
+/// # Returns
+///
+/// A percentage and count string when both inputs exist, otherwise `n/a`.
 fn display_metric(counts: Option<MetricCounts>, percentage: Option<f64>) -> String {
     match (counts, percentage) {
         (Some(counts), Some(percentage)) => {
@@ -661,6 +744,15 @@ fn display_metric(counts: Option<MetricCounts>, percentage: Option<f64>) -> Stri
 }
 
 /// Shortens long source paths while retaining their most useful suffix.
+///
+/// # Parameters
+///
+/// * `path` - The path to display.
+/// * `max_length` - Maximum number of Unicode scalar values in the result.
+///
+/// # Returns
+///
+/// The original path when it fits, or a suffix prefixed with `...`.
 fn shorten_path(path: &str, max_length: usize) -> String {
     if path.chars().count() <= max_length {
         return path.to_owned();
@@ -670,6 +762,12 @@ fn shorten_path(path: &str, max_length: usize) -> String {
 }
 
 /// Prints the crate-wide threshold result and actual aggregate percentages.
+///
+/// # Parameters
+///
+/// * `thresholds` - The configured minimum percentages.
+/// * `files` - The selected records used to aggregate hit counts.
+/// * `passed` - Whether the threshold evaluation succeeded.
 fn report_thresholds(thresholds: &Thresholds, files: &[CoverageRecord], passed: bool) {
     let status = if passed { "satisfied" } else { "failed" };
     println!("Coverage thresholds {status}:");
@@ -753,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_summary_prints_file_metrics_with_counts_and_missing_values() {
+    fn test_coverage_summary_prints_file_metrics_with_counts_and_missing_values() {
         let files = [CoverageRecord {
             coverage: FileCoverage {
                 filename: "src/lib.rs".into(),
@@ -779,7 +877,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_summary_displays_absolute_paths_relative_to_project() {
+    fn test_coverage_summary_displays_absolute_paths_relative_to_project() {
         let files = [CoverageRecord {
             coverage: FileCoverage {
                 filename: "/project/src/argument/argument_error.rs".into(),
@@ -801,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_source_path() {
+    fn test_rejects_invalid_source_path() {
         let config = Config {
             source_dirs: [("pkg".into(), vec!["../src".into()])].into_iter().collect(),
             ..Config::default()
@@ -810,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_thresholds_to_weighted_coverage_counts() {
+    fn test_applies_thresholds_to_weighted_coverage_counts() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path();
         fs::create_dir_all(project.join("src")).expect("source root");
@@ -837,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_partial_metric_counts_during_threshold_checks() {
+    fn test_rejects_partial_metric_counts_during_threshold_checks() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path();
         fs::create_dir_all(project.join("src")).expect("source root");
@@ -864,7 +962,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_llvm_file_summary() {
+    fn test_reads_llvm_file_summary() {
         let directory = tempfile::tempdir().unwrap();
         let input = directory.path().join("coverage.json");
         fs::write(
@@ -876,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_legacy_scope_threshold_and_clippy_settings() {
+    fn test_parses_legacy_scope_threshold_and_clippy_settings() {
         let directory = tempfile::tempdir().unwrap();
         let input = directory.path().join("coverage.json");
         fs::write(
@@ -896,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_top_level_legacy_clippy_setting() {
+    fn test_parses_top_level_legacy_clippy_setting() {
         let directory = tempfile::tempdir().unwrap();
         let input = directory.path().join("coverage.json");
         fs::write(&input, r#"{"run_coverage_cfg_clippy":true}"#).unwrap();
@@ -904,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_scope_and_threshold() {
+    fn test_rejects_invalid_scope_and_threshold() {
         let directory = tempfile::tempdir().unwrap();
         let input = directory.path().join("coverage.json");
         fs::write(&input, r#"{"scope":"all","thresholds":{"lines":101}}"#).unwrap();
@@ -912,7 +1010,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_stable_collection_arguments() {
+    fn test_builds_stable_collection_arguments() {
         let directory = tempfile::tempdir().unwrap();
         fs::write(directory.path().join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
         fs::create_dir_all(directory.path().join("src")).expect("source root");
@@ -935,7 +1033,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_relative_config_path_against_project_root() {
+    fn test_resolves_relative_config_path_against_project_root() {
         let directory = tempfile::tempdir().unwrap();
         let configured = Path::new(".infra/coverage/coverage.json");
 

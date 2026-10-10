@@ -32,6 +32,9 @@ pub(crate) struct CoveragePlan {
     /// Existing, canonical files excluded only from threshold calculations.
     pub(crate) exemptions: Vec<PathBuf>,
     /// Canonical directory used to resolve relative report filenames.
+    ///
+    /// Keeping this canonical ensures relative report paths resolve from the
+    /// project root even when the caller supplied a symlinked directory.
     project: PathBuf,
 }
 
@@ -39,8 +42,17 @@ impl CoveragePlan {
     /// Loads Cargo metadata and resolves `config` for `project`.
     ///
     /// Runs `cargo metadata --no-deps` and reads configured filesystem paths.
-    /// Returns an error for invalid metadata, unknown/unselected packages, an
-    /// empty scope, missing paths, or duplicate canonical source directories.
+    ///
+    /// # Parameters
+    ///
+    /// - `project`: Project directory whose Cargo workspace is inspected.
+    /// - `config`: Package scope, exclusions, source roots, and exempt files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid metadata, unknown or unselected packages,
+    /// an empty scope, missing paths, or duplicate canonical source
+    /// directories.
     pub(crate) fn load(project: &Path, config: &Config) -> Result<Self> {
         let project = project.canonicalize().context("cannot resolve project directory")?;
         let output = Command::new("cargo")
@@ -159,6 +171,16 @@ impl CoveragePlan {
     ///
     /// Existing paths are canonicalized so aliases match configured paths;
     /// reports for unavailable source files retain their absolute path.
+    ///
+    /// # Parameters
+    ///
+    /// - `filename`: Absolute path or path relative to the project directory.
+    ///
+    /// # Returns
+    ///
+    /// Returns the canonical path when the file exists, or the resolved
+    /// absolute path when canonicalization fails.
+    #[must_use]
     pub(crate) fn report_path(&self, filename: &str) -> PathBuf {
         let path = self.project.join(filename);
         fs::canonicalize(&path).unwrap_or(path)

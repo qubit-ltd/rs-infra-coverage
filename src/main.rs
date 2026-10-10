@@ -69,13 +69,9 @@ enum Command {
     },
 }
 
-/// Parses CLI arguments, resolves the project configuration, and runs a
-/// command.
-///
-/// # Errors
-///
-/// Returns an error when the project cannot be canonicalized, configuration
-/// resolution fails, or the selected coverage operation fails.
+/// Parses CLI arguments, resolves the project configuration, and runs the
+/// selected command. Parse failures and command failures are reported to
+/// stderr before the process exits with the corresponding nonzero status.
 fn main() {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

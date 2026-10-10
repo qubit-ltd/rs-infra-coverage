@@ -395,7 +395,7 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn collect_and_clippy_use_their_configured_toolchains() {
+    fn test_collect_and_clippy_use_their_configured_toolchains() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
         fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
@@ -429,7 +429,7 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn missing_shared_defaults_do_not_fall_back_to_legacy_defaults() {
+    fn test_missing_shared_defaults_do_not_fall_back_to_legacy_defaults() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
         fs::write(
@@ -448,7 +448,7 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn missing_shared_defaults_reports_the_required_path() {
+    fn test_missing_shared_defaults_reports_the_required_path() {
         let project = project();
         let (fake_cargo, log_path) = setup_fake_cargo(project.path());
         let _keep_fake_cargo_alive = fake_cargo;
@@ -461,7 +461,7 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn malformed_shared_defaults_do_not_fall_back_to_legacy_defaults() {
+    fn test_malformed_shared_defaults_do_not_fall_back_to_legacy_defaults() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
         fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
@@ -487,7 +487,7 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn existing_non_file_shared_defaults_do_not_fall_back_to_legacy_defaults() {
+    fn test_existing_non_file_shared_defaults_do_not_fall_back_to_legacy_defaults() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/tools/defaults.toml"))
             .expect("shared defaults path is a directory");
@@ -511,7 +511,7 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn check_and_report_do_not_read_toolchain_defaults() {
+    fn test_check_and_report_do_not_read_toolchain_defaults() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
         fs::write(
