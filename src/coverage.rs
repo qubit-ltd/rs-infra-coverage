@@ -182,16 +182,42 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
 fn load_toolchain(project: &Path, field: &str) -> Result<String> {
     let shared_path = project.join(".infra/tools/defaults.toml");
     let legacy_path = project.join(".infra/ci/defaults.toml");
-    let path = if shared_path.is_file() {
-        shared_path
-    } else if legacy_path.is_file() {
-        legacy_path
-    } else {
-        bail!(
-            "missing {field} in {} (or legacy {})",
-            shared_path.display(),
-            legacy_path.display()
-        );
+    let path = match fs::symlink_metadata(&shared_path) {
+        Ok(_) => {
+            ensure_regular_file(&shared_path)?;
+            shared_path
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match fs::symlink_metadata(&legacy_path) {
+                Ok(_) => {
+                    ensure_regular_file(&legacy_path)?;
+                    legacy_path
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    bail!(
+                        "missing {field} in {} (or legacy {})",
+                        shared_path.display(),
+                        legacy_path.display()
+                    );
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "failed to inspect tool defaults path {}",
+                            legacy_path.display()
+                        )
+                    });
+                }
+            }
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect tool defaults path {}",
+                    shared_path.display()
+                )
+            });
+        }
     };
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("failed to read shared tool defaults {}", path.display()))?;
@@ -207,6 +233,18 @@ fn load_toolchain(project: &Path, field: &str) -> Result<String> {
         path.display()
     );
     Ok(toolchain.to_owned())
+}
+
+/// Ensures a present defaults path resolves to a regular file.
+fn ensure_regular_file(path: &Path) -> Result<()> {
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("failed to inspect tool defaults path {}", path.display()))?;
+    ensure!(
+        metadata.is_file(),
+        "tool defaults path is not a regular file: {}",
+        path.display()
+    );
+    Ok(())
 }
 
 /// Builds the stable argument list for `cargo llvm-cov`.

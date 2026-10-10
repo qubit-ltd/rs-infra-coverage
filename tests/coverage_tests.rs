@@ -459,6 +459,30 @@ mod toolchain_tests {
     }
 
     #[test]
+    fn existing_non_file_shared_defaults_do_not_fall_back_to_legacy_defaults() {
+        let project = project();
+        fs::create_dir_all(project.path().join(".infra/tools/defaults.toml"))
+            .expect("shared defaults path is a directory");
+        fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
+        fs::write(
+            project.path().join(".infra/ci/defaults.toml"),
+            "clippy_toolchain = \"legacy-clippy\"\n",
+        )
+        .expect("legacy defaults");
+        let (fake_cargo, log_path) = setup_fake_cargo(project.path());
+        let _keep_fake_cargo_alive = fake_cargo;
+
+        let output = run_with_fake_cargo(project.path(), &log_path, &["clippy"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
+        assert!(
+            !log_path.exists(),
+            "invalid defaults path must fail before Cargo starts"
+        );
+    }
+
+    #[test]
     fn check_and_report_do_not_read_toolchain_defaults() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
