@@ -44,7 +44,7 @@
     },
     ".infra/bootstrap.sh": {
       "executable": true,
-      "sha256": "ff9f1ee2d78734eaff90c6225d32ea65608edf0012c01f27bbeb21c7f9c73a90"
+      "sha256": "fd3a6e1cf4bcc483d8acb4c50f53b5fe5971807d53a53c88960e1fb9b8eff261"
     },
     ".infra/dependency/policy.toml": {
       "executable": false,
