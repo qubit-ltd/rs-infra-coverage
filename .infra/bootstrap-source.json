@@ -74,5 +74,5 @@
   "package_sha256": "7b5a3f60ad076e4eee2b178aa16a6d7d1448ac4107ff99a7917f6830f3792035",
   "schema": 1,
   "source_repository": "https://github.com/qubit-ltd/rs-infra-tools.git",
-  "source_revision": "ed23f186a2fb840dbc2c90ebfd9d2e4bf5a8a3af"
+  "source_revision": "d4d3dc7cd157c042bf3949be2261681d136c1385"
 }
