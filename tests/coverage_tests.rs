@@ -414,19 +414,41 @@ mod toolchain_tests {
     }
 
     #[test]
-    fn collect_falls_back_to_legacy_defaults_when_shared_file_is_absent() {
+    fn missing_shared_defaults_do_not_fall_back_to_legacy_defaults() {
         let project = project();
         fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
         fs::write(
             project.path().join(".infra/ci/defaults.toml"),
-            "build_toolchain = \"legacy-build\"\n",
+            "clippy_toolchain = \"legacy-clippy\"\n",
         )
         .expect("legacy defaults");
         let (fake_cargo, log_path) = setup_fake_cargo(project.path());
-
         let _keep_fake_cargo_alive = fake_cargo;
-        let output = log(project.path(), &log_path, &["collect"]);
-        assert!(output.contains("|legacy-build"), "{output}");
+
+        let output = run_with_fake_cargo(project.path(), &log_path, &["clippy"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
+        assert!(
+            !log_path.exists(),
+            "missing defaults must fail before Cargo starts"
+        );
+    }
+
+    #[test]
+    fn missing_shared_defaults_reports_the_required_path() {
+        let project = project();
+        let (fake_cargo, log_path) = setup_fake_cargo(project.path());
+        let _keep_fake_cargo_alive = fake_cargo;
+
+        let output = run_with_fake_cargo(project.path(), &log_path, &["clippy"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
+        assert!(
+            !log_path.exists(),
+            "missing defaults must fail before Cargo starts"
+        );
     }
 
     #[test]

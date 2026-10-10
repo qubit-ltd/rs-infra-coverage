@@ -177,48 +177,20 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
     Ok(())
 }
 
-/// Loads the configured Cargo toolchain from shared defaults, falling back to
-/// the legacy CI defaults file only when the shared file is absent.
+/// Loads the configured Cargo toolchain from the shared defaults file.
 fn load_toolchain(project: &Path, field: &str) -> Result<String> {
-    let shared_path = project.join(".infra/tools/defaults.toml");
-    let legacy_path = project.join(".infra/ci/defaults.toml");
-    let path = match fs::symlink_metadata(&shared_path) {
-        Ok(_) => {
-            ensure_regular_file(&shared_path)?;
-            shared_path
-        }
+    let path = project.join(".infra/tools/defaults.toml");
+    match fs::symlink_metadata(&path) {
+        Ok(_) => ensure_regular_file(&path)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match fs::symlink_metadata(&legacy_path) {
-                Ok(_) => {
-                    ensure_regular_file(&legacy_path)?;
-                    legacy_path
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    bail!(
-                        "missing {field} in {} (or legacy {})",
-                        shared_path.display(),
-                        legacy_path.display()
-                    );
-                }
-                Err(error) => {
-                    return Err(error).with_context(|| {
-                        format!(
-                            "failed to inspect tool defaults path {}",
-                            legacy_path.display()
-                        )
-                    });
-                }
-            }
+            bail!("missing {field} in {}", path.display());
         }
         Err(error) => {
             return Err(error).with_context(|| {
-                format!(
-                    "failed to inspect tool defaults path {}",
-                    shared_path.display()
-                )
+                format!("failed to inspect tool defaults path {}", path.display())
             });
         }
-    };
+    }
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("failed to read shared tool defaults {}", path.display()))?;
     let defaults: toml::Value = toml::from_str(&contents)
