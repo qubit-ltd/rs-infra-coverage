@@ -17,6 +17,7 @@ use std::process::Command;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use serde_json::Value;
 use serde_json::from_str;
 
@@ -117,6 +118,7 @@ pub fn collect_with_threshold_policy(
     enforce_thresholds: bool,
 ) -> Result<()> {
     let config = load_config(config_path)?;
+    let build_toolchain = load_toolchain(project, "build_toolchain")?;
     let default_output = project.join("target/infra/coverage/raw.json");
     let output = output.unwrap_or(&default_output);
     if let Some(parent) = output.parent() {
@@ -124,6 +126,7 @@ pub fn collect_with_threshold_policy(
     }
     let mut command = Command::new("cargo");
     command.args(collection_args(&config, project)?);
+    command.env("RUSTUP_TOOLCHAIN", build_toolchain);
     let status = command
         .arg(output)
         .current_dir(project)
@@ -153,12 +156,14 @@ pub fn collect_with_threshold_policy(
 /// execution fails.
 pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<()> {
     let config = load_config(config_path)?;
+    let clippy_toolchain = load_toolchain(project, "clippy_toolchain")?;
     let use_coverage_cfg = coverage_cfg
         || config.clippy.coverage_cfg
         || config.coverage_cfg_clippy
         || env::var("RUN_COVERAGE_CFG_CLIPPY").as_deref() == Ok("1");
     let mut command = Command::new("cargo");
     command.args(["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]);
+    command.env("RUSTUP_TOOLCHAIN", clippy_toolchain);
     if use_coverage_cfg {
         command.env("RUSTFLAGS", "--cfg coverage");
     }
@@ -170,6 +175,38 @@ pub fn clippy(project: &Path, config_path: &Path, coverage_cfg: bool) -> Result<
         bail!("cargo clippy failed");
     }
     Ok(())
+}
+
+/// Loads the configured Cargo toolchain from shared defaults, falling back to
+/// the legacy CI defaults file only when the shared file is absent.
+fn load_toolchain(project: &Path, field: &str) -> Result<String> {
+    let shared_path = project.join(".infra/tools/defaults.toml");
+    let legacy_path = project.join(".infra/ci/defaults.toml");
+    let path = if shared_path.is_file() {
+        shared_path
+    } else if legacy_path.is_file() {
+        legacy_path
+    } else {
+        bail!(
+            "missing {field} in {} (or legacy {})",
+            shared_path.display(),
+            legacy_path.display()
+        );
+    };
+    let contents = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read shared tool defaults {}", path.display()))?;
+    let defaults: toml::Value = toml::from_str(&contents)
+        .with_context(|| format!("invalid tool defaults TOML {}", path.display()))?;
+    let toolchain = defaults
+        .get(field)
+        .and_then(toml::Value::as_str)
+        .with_context(|| format!("missing or non-string {field} in {}", path.display()))?;
+    ensure!(
+        !toolchain.trim().is_empty(),
+        "empty {field} in {}",
+        path.display()
+    );
+    Ok(toolchain.to_owned())
 }
 
 /// Builds the stable argument list for `cargo llvm-cov`.

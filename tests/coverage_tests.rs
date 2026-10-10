@@ -319,3 +319,176 @@ fn test_cli_reports_policy_failures_with_nonzero_exit() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("lines <= 90.00"), "{stderr}");
 }
+
+#[cfg(unix)]
+mod toolchain_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    fn setup_fake_cargo(project: &Path) -> (TempDir, PathBuf) {
+        let directory = tempdir().expect("fake cargo directory");
+        let log = directory.path().join("cargo.log");
+        let script = directory.path().join("cargo");
+        let manifest = project.join("Cargo.toml");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"${{RUSTUP_TOOLCHAIN-}}\" >> \"$CARGO_LOG\"\n\nif [ \"$1\" = metadata ]; then\n  printf '%s' '{{\"workspace_members\":[\"fake-id\"],\"workspace_default_members\":[\"fake-id\"],\"packages\":[{{\"name\":\"demo\",\"id\":\"fake-id\",\"manifest_path\":\"{}\"}}]}}'\n  exit 0\nfi\n\nif [ \"$1\" = llvm-cov ]; then\n  printf '%s' '{{\"data\":[{{\"files\":[{{\"filename\":\"src/lib.rs\",\"summary\":{{\"lines\":{{\"covered\":95,\"count\":100}},\"functions\":{{\"covered\":95,\"count\":100}},\"regions\":{{\"covered\":95,\"count\":100}}}}}}]}}]}}' > \"$6\"\nfi\n",
+                manifest.display(),
+            ),
+        )
+        .expect("fake cargo script");
+        let mut permissions = fs::metadata(&script)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("executable script");
+        fs::create_dir_all(project.join(".infra/coverage")).expect("coverage config directory");
+        fs::write(project.join(".infra/coverage/coverage.json"), "{}").expect("coverage config");
+        (directory, log)
+    }
+
+    fn run_with_fake_cargo(project: &Path, log: &Path, command: &[&str]) -> std::process::Output {
+        let path = std::env::var_os("PATH").expect("PATH");
+        let fake_bin = log.parent().expect("fake cargo directory");
+        let mut process = Command::new(env!("CARGO_BIN_EXE_rs-infra-coverage"));
+        process
+            .args(["--project", project.to_str().expect("project path")])
+            .args(command)
+            .env(
+                "PATH",
+                std::env::join_paths(
+                    std::iter::once(fake_bin.to_path_buf()).chain(std::env::split_paths(&path)),
+                )
+                .expect("joined PATH"),
+            )
+            .env("CARGO_LOG", log);
+        process.output().expect("run coverage command")
+    }
+
+    fn log(project: &Path, log: &Path, command: &[&str]) -> String {
+        let output = run_with_fake_cargo(project, log, command);
+        assert!(
+            output.status.success(),
+            "{}; log: {}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(log).unwrap_or_else(|_| "<missing>".into())
+        );
+        fs::read_to_string(log).expect("cargo log")
+    }
+
+    #[test]
+    fn collect_and_clippy_use_their_configured_toolchains() {
+        let project = project();
+        fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
+        fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
+        fs::write(
+            project.path().join(".infra/tools/defaults.toml"),
+            "build_toolchain = \"build-nightly\"\nclippy_toolchain = \"clippy-nightly\"\n",
+        )
+        .expect("shared defaults");
+        fs::write(
+            project.path().join(".infra/ci/defaults.toml"),
+            "build_toolchain = \"legacy-build\"\nclippy_toolchain = \"legacy-clippy\"\n",
+        )
+        .expect("legacy defaults");
+        let (fake_cargo, log_path) = setup_fake_cargo(project.path());
+
+        let _keep_fake_cargo_alive = fake_cargo;
+        let collect_log = log(project.path(), &log_path, &["collect"]);
+        assert!(
+            collect_log.contains("llvm-cov --workspace --all-features --json --output-path")
+                && collect_log.contains("|build-nightly"),
+            "{collect_log}"
+        );
+        assert!(collect_log.contains("metadata --no-deps"), "{collect_log}");
+
+        fs::remove_file(&log_path).expect("clear command log");
+        let clippy_log = log(project.path(), &log_path, &["clippy"]);
+        assert!(
+            clippy_log
+                .contains("clippy --all-targets --all-features -- -D warnings|clippy-nightly"),
+            "{clippy_log}"
+        );
+    }
+
+    #[test]
+    fn collect_falls_back_to_legacy_defaults_when_shared_file_is_absent() {
+        let project = project();
+        fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
+        fs::write(
+            project.path().join(".infra/ci/defaults.toml"),
+            "build_toolchain = \"legacy-build\"\n",
+        )
+        .expect("legacy defaults");
+        let (fake_cargo, log_path) = setup_fake_cargo(project.path());
+
+        let _keep_fake_cargo_alive = fake_cargo;
+        let output = log(project.path(), &log_path, &["collect"]);
+        assert!(output.contains("|legacy-build"), "{output}");
+    }
+
+    #[test]
+    fn malformed_shared_defaults_do_not_fall_back_to_legacy_defaults() {
+        let project = project();
+        fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
+        fs::create_dir_all(project.path().join(".infra/ci")).expect("legacy config directory");
+        fs::write(
+            project.path().join(".infra/tools/defaults.toml"),
+            "clippy_toolchain = [\n",
+        )
+        .expect("invalid shared defaults");
+        fs::write(
+            project.path().join(".infra/ci/defaults.toml"),
+            "clippy_toolchain = \"legacy-clippy\"\n",
+        )
+        .expect("legacy defaults");
+        let (fake_cargo, log_path) = setup_fake_cargo(project.path());
+        let _keep_fake_cargo_alive = fake_cargo;
+
+        let output = run_with_fake_cargo(project.path(), &log_path, &["clippy"]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains("invalid tool defaults TOML"), "{stderr}");
+        assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
+        assert!(
+            !log_path.exists(),
+            "invalid defaults must fail before Cargo starts"
+        );
+    }
+
+    #[test]
+    fn check_and_report_do_not_read_toolchain_defaults() {
+        let project = project();
+        fs::create_dir_all(project.path().join(".infra/tools")).expect("tools config directory");
+        fs::write(
+            project.path().join(".infra/tools/defaults.toml"),
+            "not valid TOML = [\n",
+        )
+        .expect("invalid shared defaults");
+        let (fake_cargo, log_path) = setup_fake_cargo(project.path());
+        let _keep_fake_cargo_alive = fake_cargo;
+
+        let project_path = project.path().to_str().expect("project path");
+        let input = project.path().join("coverage.json");
+        fs::write(
+            &input,
+            json!({"data":[{"files":[record("src/lib.rs", 95, 95, 95)]}]}).to_string(),
+        )
+        .expect("coverage report");
+        for action in ["check", "report"] {
+            let input_path = input.to_str().expect("input path");
+            let output = Command::new(env!("CARGO_BIN_EXE_rs-infra-coverage"))
+                .args(["--project", project_path, action, "--input", input_path])
+                .output()
+                .expect("run report action");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert!(!log_path.exists(), "check/report must not invoke Cargo");
+    }
+}
