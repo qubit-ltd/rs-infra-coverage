@@ -186,31 +186,25 @@ fn load_toolchain(project: &Path, field: &str) -> Result<String> {
             bail!("missing {field} in {}", path.display());
         }
         Err(error) => {
-            return Err(error).with_context(|| {
-                format!("failed to inspect tool defaults path {}", path.display())
-            });
+            return Err(error).with_context(|| format!("failed to inspect tool defaults path {}", path.display()));
         }
     }
-    let contents = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read shared tool defaults {}", path.display()))?;
-    let defaults: toml::Value = toml::from_str(&contents)
-        .with_context(|| format!("invalid tool defaults TOML {}", path.display()))?;
+    let contents =
+        fs::read_to_string(&path).with_context(|| format!("failed to read shared tool defaults {}", path.display()))?;
+    let defaults: toml::Value =
+        toml::from_str(&contents).with_context(|| format!("invalid tool defaults TOML {}", path.display()))?;
     let toolchain = defaults
         .get(field)
         .and_then(toml::Value::as_str)
         .with_context(|| format!("missing or non-string {field} in {}", path.display()))?;
-    ensure!(
-        !toolchain.trim().is_empty(),
-        "empty {field} in {}",
-        path.display()
-    );
+    ensure!(!toolchain.trim().is_empty(), "empty {field} in {}", path.display());
     Ok(toolchain.to_owned())
 }
 
 /// Ensures a present defaults path resolves to a regular file.
 fn ensure_regular_file(path: &Path) -> Result<()> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("failed to inspect tool defaults path {}", path.display()))?;
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect tool defaults path {}", path.display()))?;
     ensure!(
         metadata.is_file(),
         "tool defaults path is not a regular file: {}",

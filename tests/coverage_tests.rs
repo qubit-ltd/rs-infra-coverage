@@ -322,9 +322,18 @@ fn test_cli_reports_policy_failures_with_nonzero_exit() {
 
 #[cfg(unix)]
 mod toolchain_tests {
-    use super::*;
+    use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::path::PathBuf;
+    use std::process::Command;
+
+    use serde_json::json;
+    use tempfile::TempDir;
+    use tempfile::tempdir;
+
+    use super::project;
+    use super::record;
 
     fn setup_fake_cargo(project: &Path) -> (TempDir, PathBuf) {
         let directory = tempdir().expect("fake cargo directory");
@@ -334,14 +343,23 @@ mod toolchain_tests {
         fs::write(
             &script,
             format!(
-                "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"${{RUSTUP_TOOLCHAIN-}}\" >> \"$CARGO_LOG\"\n\nif [ \"$1\" = metadata ]; then\n  printf '%s' '{{\"workspace_members\":[\"fake-id\"],\"workspace_default_members\":[\"fake-id\"],\"packages\":[{{\"name\":\"demo\",\"id\":\"fake-id\",\"manifest_path\":\"{}\"}}]}}'\n  exit 0\nfi\n\nif [ \"$1\" = llvm-cov ]; then\n  printf '%s' '{{\"data\":[{{\"files\":[{{\"filename\":\"src/lib.rs\",\"summary\":{{\"lines\":{{\"covered\":95,\"count\":100}},\"functions\":{{\"covered\":95,\"count\":100}},\"regions\":{{\"covered\":95,\"count\":100}}}}}}]}}]}}' > \"$6\"\nfi\n",
+                concat!(
+                    "#!/bin/sh\nprintf '%s|%s\\n' \"$*\" \"${{RUSTUP_TOOLCHAIN-}}\" >> \"$CARGO_LOG\"\n\n",
+                    "if [ \"$1\" = metadata ]; then\n  printf '%s' ",
+                    "'{{\"workspace_members\":[\"fake-id\"],\"workspace_default_members\":[\"fake-id\"],",
+                    "\"packages\":[{{\"name\":\"demo\",\"id\":\"fake-id\",\"manifest_path\":\"{}\"}}]}}'\n",
+                    "  exit 0\nfi\n\n",
+                    "if [ \"$1\" = llvm-cov ]; then\n  printf '%s' ",
+                    "'{{\"data\":[{{\"files\":[{{\"filename\":\"src/lib.rs\",\"summary\":",
+                    "{{\"lines\":{{\"covered\":95,\"count\":100}},\"functions\":",
+                    "{{\"covered\":95,\"count\":100}},\"regions\":",
+                    "{{\"covered\":95,\"count\":100}}}}}}]}}]}}' > \"$6\"\nfi\n",
+                ),
                 manifest.display(),
             ),
         )
         .expect("fake cargo script");
-        let mut permissions = fs::metadata(&script)
-            .expect("script metadata")
-            .permissions();
+        let mut permissions = fs::metadata(&script).expect("script metadata").permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&script, permissions).expect("executable script");
         fs::create_dir_all(project.join(".infra/coverage")).expect("coverage config directory");
@@ -358,10 +376,8 @@ mod toolchain_tests {
             .args(command)
             .env(
                 "PATH",
-                std::env::join_paths(
-                    std::iter::once(fake_bin.to_path_buf()).chain(std::env::split_paths(&path)),
-                )
-                .expect("joined PATH"),
+                std::env::join_paths(std::iter::once(fake_bin.to_path_buf()).chain(std::env::split_paths(&path)))
+                    .expect("joined PATH"),
             )
             .env("CARGO_LOG", log);
         process.output().expect("run coverage command")
@@ -407,8 +423,7 @@ mod toolchain_tests {
         fs::remove_file(&log_path).expect("clear command log");
         let clippy_log = log(project.path(), &log_path, &["clippy"]);
         assert!(
-            clippy_log
-                .contains("clippy --all-targets --all-features -- -D warnings|clippy-nightly"),
+            clippy_log.contains("clippy --all-targets --all-features -- -D warnings|clippy-nightly"),
             "{clippy_log}"
         );
     }
@@ -429,10 +444,7 @@ mod toolchain_tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success());
         assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
-        assert!(
-            !log_path.exists(),
-            "missing defaults must fail before Cargo starts"
-        );
+        assert!(!log_path.exists(), "missing defaults must fail before Cargo starts");
     }
 
     #[test]
@@ -445,10 +457,7 @@ mod toolchain_tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success());
         assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
-        assert!(
-            !log_path.exists(),
-            "missing defaults must fail before Cargo starts"
-        );
+        assert!(!log_path.exists(), "missing defaults must fail before Cargo starts");
     }
 
     #[test]
@@ -474,10 +483,7 @@ mod toolchain_tests {
         assert!(!output.status.success());
         assert!(stderr.contains("invalid tool defaults TOML"), "{stderr}");
         assert!(stderr.contains(".infra/tools/defaults.toml"), "{stderr}");
-        assert!(
-            !log_path.exists(),
-            "invalid defaults must fail before Cargo starts"
-        );
+        assert!(!log_path.exists(), "invalid defaults must fail before Cargo starts");
     }
 
     #[test]
@@ -529,11 +535,7 @@ mod toolchain_tests {
                 .args(["--project", project_path, action, "--input", input_path])
                 .output()
                 .expect("run report action");
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         }
         assert!(!log_path.exists(), "check/report must not invoke Cargo");
     }
