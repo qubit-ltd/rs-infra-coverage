@@ -68,11 +68,11 @@
     },
     "update-infra.sh": {
       "executable": true,
-      "sha256": "84825b93fdb028fe414a5561c1e9d3ba7a59dedd19da9fca00294af877457e18"
+      "sha256": "d4687f8f57286d023b55185be016306fa9cc536c69fc9d1888316ad078846cfe"
     }
   },
-  "package_sha256": "eb354905e0944f4dcee8e5b9f3515839dab60ccd03ce25f945386863248b93fc",
+  "package_sha256": "7b5a3f60ad076e4eee2b178aa16a6d7d1448ac4107ff99a7917f6830f3792035",
   "schema": 1,
-  "source_repository": "git@github.com:qubit-ltd/rs-infra-tools.git",
-  "source_revision": "51067a6fbf971046a67e77bb8b8968ae28b43953"
+  "source_repository": "https://github.com/qubit-ltd/rs-infra-tools.git",
+  "source_revision": "743b776798746504b51cabb1754e34922d8e73f5"
 }
