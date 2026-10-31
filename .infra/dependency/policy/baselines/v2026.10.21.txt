@@ -18,6 +18,7 @@ crossbeam-channel ^0.5
 crossbeam-deque ^0.8
 crossbeam-queue ^0.3
 csv ^1.4
+digest ^0.11
 dotenvy ^0.15
 fastrand ^2.5
 flate2 ^1.1
@@ -40,7 +41,9 @@ hyper ^1.12
 hyper-util ^0.1
 indexmap ^2.14
 inventory ^0.3
+leb128 ^0.2
 libc ^0.2
+libfuzzer-sys ^0.4
 log ^0.4
 loom ^0.7
 magika ^1.1
@@ -48,6 +51,7 @@ matchit ^0.8
 num-bigint ^0.4
 num-rational ^0.4
 num-traits ^0.2
+object_store ^0.14
 oneshot ^0.2
 ort >=2.0.0-rc.12,<2.1
 parking_lot ^0.12
@@ -76,6 +80,7 @@ semver ^1.0
 serde ^1.0
 serde_ignored ^0.1
 serde_json ^1.0
+serde_json_canonicalizer ^0.4
 serde_norway ^0.9
 serde_path_to_error ^0.1
 serde_test ^1.0
@@ -86,7 +91,7 @@ tar ^0.4
 tempfile ^3.27
 thiserror ^2.0
 threadpool ^1.8
-tokio ^1.53
+tokio ^1.54
 tokio-rustls ^0.26
 tokio-tungstenite ^0.30
 tokio-util ^0.7
