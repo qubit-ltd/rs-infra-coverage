@@ -8,6 +8,8 @@
 
 //! Coverage data loading, filtering, collection, and reporting operations.
 
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
 use std::fs;
@@ -19,6 +21,7 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
+use rustc_demangle::try_demangle;
 use serde_json::Value;
 use serde_json::from_str;
 
@@ -26,6 +29,17 @@ use crate::Config;
 use crate::Thresholds;
 use crate::coverage_plan::CoveragePlan;
 use crate::file_coverage::FileCoverage;
+
+#[path = "coverage_record.rs"]
+mod coverage_record;
+#[path = "metric_counts.rs"]
+mod metric_counts;
+#[path = "test_modules.rs"]
+mod source_ranges;
+
+use coverage_record::CoverageRecord;
+use metric_counts::MetricCounts;
+use source_ranges::test_module_ranges;
 
 /// Loads and validates a coverage configuration file.
 ///
@@ -227,6 +241,10 @@ fn load_toolchain(project: &Path, field: &str) -> Result<String> {
 }
 
 /// Ensures a present defaults path resolves to a regular file.
+///
+/// # Parameters
+///
+/// * `path` - Shared defaults file to inspect.
 ///
 /// # Errors
 ///
@@ -450,30 +468,6 @@ fn valid_relative_path(path: &str) -> bool {
         && !path.chars().any(|ch| ch.is_control())
 }
 
-/// Stores the covered and total item counts for one coverage metric.
-#[derive(Debug, Clone, Copy)]
-struct MetricCounts {
-    /// Number of covered items reported by LLVM.
-    covered: u64,
-    /// Total number of items measured by LLVM.
-    count: u64,
-}
-
-/// Retains LLVM hit counts for weighted aggregate threshold evaluation.
-#[derive(Debug)]
-struct CoverageRecord {
-    /// Display metrics and source path for this file.
-    coverage: FileCoverage,
-    /// Line counts reported for this file.
-    lines: Option<MetricCounts>,
-    /// Function counts reported for this file.
-    functions: Option<MetricCounts>,
-    /// Region counts reported for this file.
-    regions: Option<MetricCounts>,
-    /// Branch counts reported for this file.
-    branches: Option<MetricCounts>,
-}
-
 /// Selects one metric's counts from a coverage record.
 type MetricCountsGetter = fn(&CoverageRecord) -> Option<MetricCounts>;
 /// Selects one metric's displayed percentage from a coverage record.
@@ -481,6 +475,10 @@ type MetricPercentGetter = fn(&CoverageRecord) -> Option<f64>;
 
 /// Reads covered and total counts from one LLVM metric object.
 /// Returns `None` when either count is absent or is not an unsigned integer.
+///
+/// # Parameters
+///
+/// * `value` - LLVM metric object containing covered and total counts.
 fn metric_counts(value: Option<&Value>) -> Option<MetricCounts> {
     let value = value?;
     Some(MetricCounts {
@@ -505,6 +503,7 @@ fn read_files(path: &Path) -> Result<Vec<CoverageRecord>> {
         .get("data")
         .and_then(Value::as_array)
         .context("coverage JSON must contain a data array")?;
+    let functions_by_file = source_function_counts(records);
     let mut files = Vec::new();
     for record in records {
         for file in record.get("files").and_then(Value::as_array).into_iter().flatten() {
@@ -515,25 +514,149 @@ fn read_files(path: &Path) -> Result<Vec<CoverageRecord>> {
                 .to_owned();
             let summary = file.get("summary");
             let lines = summary.and_then(|summary| summary.get("lines"));
-            let functions = summary.and_then(|summary| summary.get("functions"));
+            let summary_functions = summary.and_then(|summary| summary.get("functions"));
+            let functions = match &functions_by_file {
+                Some(functions) => functions.get(&filename).copied(),
+                None => metric_counts(summary_functions),
+            };
             let regions = summary.and_then(|summary| summary.get("regions"));
             let branches = summary.and_then(|summary| summary.get("branches"));
+            let functions_percent = functions
+                .filter(|counts| counts.count > 0)
+                .map(|counts| counts.covered as f64 / counts.count as f64 * 100.0)
+                .or_else(|| {
+                    functions_by_file
+                        .is_none()
+                        .then(|| percent(summary_functions))
+                        .flatten()
+                });
             files.push(CoverageRecord {
                 coverage: FileCoverage {
                     filename,
                     lines_percent: percent(lines),
-                    functions_percent: percent(functions),
+                    functions_percent,
                     regions_percent: percent(regions),
                     branches_percent: percent(branches),
                 },
                 lines: metric_counts(lines),
-                functions: metric_counts(functions),
+                functions,
                 regions: metric_counts(regions),
                 branches: metric_counts(branches),
             });
         }
     }
     Ok(files)
+}
+
+/// Returns source-level function counts after ignoring test-only modules.
+///
+/// LLVM can report the same Rust function multiple times when Cargo builds
+/// separate crate instances for unit and integration-test targets. Grouping
+/// those instances by source location avoids counting one source function
+/// more than once. Functions in modules named `tests` or ending in `_tests`
+/// are excluded, matching the repository coverage configuration's exclusion
+/// of test code.
+///
+/// # Parameters
+///
+/// * `records` - LLVM coverage records whose function instances are grouped.
+///
+/// # Returns
+///
+/// Per-file function counts, or `None` when the report omits function records.
+fn source_function_counts(records: &[Value]) -> Option<BTreeMap<String, MetricCounts>> {
+    let has_function_records = records.iter().any(|record| record.get("functions").is_some());
+    if !has_function_records {
+        return None;
+    }
+
+    let mut locations = BTreeMap::<(String, (u64, u64, u64, u64)), bool>::new();
+    let mut test_ranges = HashMap::<String, Vec<(usize, usize)>>::new();
+    for function in records
+        .iter()
+        .flat_map(|record| record.get("functions").and_then(Value::as_array).into_iter().flatten())
+    {
+        let Some(name) = function.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(filename) = function
+            .get("filenames")
+            .and_then(Value::as_array)
+            .and_then(|filenames| filenames.first())
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let Some(region) = function
+            .get("regions")
+            .and_then(Value::as_array)
+            .and_then(|regions| regions.first())
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        let Some(position) = source_position(region) else {
+            continue;
+        };
+        if is_test_only_function(name) {
+            let ranges = test_ranges
+                .entry(filename.to_owned())
+                .or_insert_with(|| test_module_ranges(Path::new(filename)));
+            let start_line = position.0 as usize;
+            if ranges.iter().any(|(start, end)| (*start..=*end).contains(&start_line)) {
+                continue;
+            }
+            // Test-target monomorphizations of production functions carry a
+            // test module in their symbol path, while their source location
+            // remains outside every cfg(test) module. Keep those hits.
+        }
+        let covered = function.get("count").and_then(Value::as_u64).unwrap_or(0) > 0;
+        locations
+            .entry((filename.to_owned(), position))
+            .and_modify(|already_covered| *already_covered |= covered)
+            .or_insert(covered);
+    }
+
+    let mut files = BTreeMap::<String, MetricCounts>::new();
+    for ((filename, _), covered) in locations {
+        let counts = files.entry(filename).or_insert(MetricCounts { covered: 0, count: 0 });
+        counts.count += 1;
+        counts.covered += u64::from(covered);
+    }
+    Some(files)
+}
+
+/// Extracts a function's source extent from the first LLVM region.
+///
+/// # Parameters
+///
+/// * `region` - LLVM region coordinates for the function.
+///
+/// # Returns
+///
+/// The start and end line and column, or `None` for malformed coordinates.
+fn source_position(region: &[Value]) -> Option<(u64, u64, u64, u64)> {
+    Some((
+        region.first()?.as_u64()?,
+        region.get(1)?.as_u64()?,
+        region.get(2)?.as_u64()?,
+        region.get(3)?.as_u64()?,
+    ))
+}
+
+/// Identifies functions whose Rust module path marks them as test code.
+///
+/// # Parameters
+///
+/// * `name` - An LLVM function symbol, mangled or already human-readable.
+fn is_test_only_function(name: &str) -> bool {
+    let Ok(name) = try_demangle(name) else {
+        return false;
+    };
+    name.to_string().split("::").any(|segment| {
+        let segment = segment.split_once('[').map_or(segment, |(path, _)| path);
+        segment == "tests" || segment.ends_with("_tests")
+    })
 }
 
 /// Extracts a percentage value from an LLVM metric object.
@@ -557,6 +680,12 @@ fn percent(value: Option<&Value>) -> Option<f64> {
 /// Root matching precedes exemptions, so exempt files still prove their source
 /// root was measured. Returns an error for an invalid plan or an unmatched
 /// root.
+///
+/// # Parameters
+///
+/// * `project` - Project root used to resolve configured source roots.
+/// * `config` - Coverage policy whose roots are checked.
+/// * `files` - Coverage records parsed from LLVM output.
 fn select_files(project: &Path, config: &Config, files: Vec<CoverageRecord>) -> Result<Vec<CoverageRecord>> {
     let plan = CoveragePlan::load(project, config)?;
     let paths: Vec<_> = files
@@ -971,6 +1100,56 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_files(&input).unwrap()[0].coverage.lines_percent, Some(91.0));
+    }
+
+    /// Confirms test-only functions are excluded and crate instances are
+    /// merged.
+    #[test]
+    fn test_reads_source_function_coverage_without_test_modules_or_duplicate_instances() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("lib.rs");
+        let mut lines = vec!["pub fn production() {}".to_owned()];
+        lines.extend((2..19).map(|line| format!("// source line {line}")));
+        lines.push("#[cfg(test)]".to_owned());
+        lines.push("mod data_api_tests {".to_owned());
+        lines.push("    fn test_helper() {}".to_owned());
+        lines.push("}".to_owned());
+        fs::write(&source, lines.join("\n")).unwrap();
+        let source = source.to_string_lossy();
+        let input = directory.path().join("coverage.json");
+        let product = "_RNvMs_NtCsjslA8V0NLzA_13qubit_command14command_runnerNtB4_13CommandRunner14bounded_outputB6_";
+        let test = "_RNvNtNtCs7A5CI68aJzu_13qubit_command7command14data_api_testss_48test_data_accessors_report_unconfigured_defaults";
+        fs::write(
+            &input,
+            json!({
+                "data": [{
+                    "files": [{
+                        "filename": source,
+                        "summary": {
+                            "lines": {"covered": 9, "count": 10, "percent": 90.0},
+                            "functions": {"covered": 95, "count": 100, "percent": 95.0},
+                            "regions": {"covered": 17, "count": 20, "percent": 85.0}
+                        }
+                    }],
+                    "functions": [
+                        {"name": product, "count": 0, "filenames": [source], "regions": [[1, 1, 2, 1, 0, 0, 0, 0]]},
+                        {"name": product, "count": 0, "filenames": [source], "regions": [[1, 1, 2, 1, 0, 0, 0, 0]]},
+                        {"name": product, "count": 0, "filenames": [source], "regions": [[10, 1, 11, 1, 0, 0, 0, 0]]},
+                        {"name": "_RNvYNtNtNtNtCs7A5CI68aJzu_13qubit_command9execution9contracts9fact_sink5tests21DefaultDiagnosticSinkNtB6_8FactSink23publish_stop_diagnosticBc_", "count": 1, "filenames": [source], "regions": [[1, 1, 2, 1, 1, 0, 0, 0]]},
+                        {"name": test, "count": 1, "filenames": [source], "regions": [[21, 1, 22, 1, 1, 0, 0, 0]]}
+                    ]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let file = &read_files(&input).unwrap()[0];
+
+        assert_eq!(file.functions, Some(MetricCounts { covered: 1, count: 2 }));
+        assert_eq!(file.coverage.functions_percent, Some(50.0));
+        assert_eq!(file.coverage.lines_percent, Some(90.0));
+        assert_eq!(file.coverage.regions_percent, Some(85.0));
     }
 
     #[test]

@@ -47,7 +47,7 @@ fn project() -> TempDir {
 }
 
 #[test]
-fn cli_summaries_prefix_success_and_failure_with_status_icons() {
+fn test_cli_summaries_prefix_success_and_failure_with_status_icons() {
     let help = run(&["--help"]);
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("✅ rs-infra-coverage: help succeeded"));
@@ -72,7 +72,7 @@ fn cli_summaries_prefix_success_and_failure_with_status_icons() {
 }
 
 #[test]
-fn cli_check_uses_the_coverage_directory_config_by_default() {
+fn test_cli_check_uses_the_coverage_directory_config_by_default() {
     let project = project();
     fs::create_dir_all(project.path().join(".infra/coverage")).expect("coverage configuration directory");
     fs::write(

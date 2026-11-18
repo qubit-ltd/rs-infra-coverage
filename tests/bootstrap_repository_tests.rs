@@ -9,7 +9,7 @@
 const TOOLS_REPOSITORY_HTTPS: &str = "https://github.com/qubit-ltd/rs-infra-tools.git";
 
 #[test]
-fn remote_ci_bootstrap_uses_https_for_public_tools_repository() {
+fn test_remote_ci_bootstrap_uses_https_for_public_tools_repository() {
     let updater = include_str!("../update-infra.sh");
     let bootstrap = include_str!("../.infra/bootstrap.sh");
     let snapshot = include_str!("../.infra/bootstrap-source.json");

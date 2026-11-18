@@ -9,12 +9,10 @@
 //! Command-line entry point for the coverage utility.
 
 use std::fs;
-use std::path::PathBuf;
 use std::process;
 
 use anyhow::Result;
 use clap::Parser;
-use clap::Subcommand;
 use qubit_infra_coverage::check;
 use qubit_infra_coverage::clippy;
 use qubit_infra_coverage::collect;
@@ -22,52 +20,11 @@ use qubit_infra_coverage::collect_with_threshold_policy;
 use qubit_infra_coverage::report;
 use qubit_infra_coverage::resolve_config_path;
 
-/// Defines the top-level command-line options.
-#[derive(Debug, Parser)]
-#[command(name = "rs-infra-coverage")]
-struct Cli {
-    /// Project root in which coverage commands run.
-    #[arg(long, default_value = ".")]
-    project: PathBuf,
-    /// Coverage configuration path, relative to the project unless absolute.
-    #[arg(long, default_value = ".infra/coverage/coverage.json")]
-    config: PathBuf,
-    /// Operation to perform.
-    #[command(subcommand)]
-    command: Command,
-}
+use crate::cli::Cli;
+use crate::command::Command;
 
-/// Selects the coverage operation to execute.
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Collect and validate a coverage report.
-    Collect {
-        /// Optional output path for the raw report.
-        #[arg(long)]
-        output: Option<PathBuf>,
-        /// Report threshold shortfalls without failing the collection.
-        #[arg(long)]
-        ignore_thresholds: bool,
-    },
-    /// Validate a coverage report against configured thresholds.
-    Check {
-        /// Input LLVM coverage JSON report.
-        #[arg(long)]
-        input: PathBuf,
-    },
-    /// Print selected coverage metrics without threshold validation.
-    Report {
-        /// Input LLVM coverage JSON report.
-        #[arg(long)]
-        input: PathBuf,
-    },
-    /// Run Clippy with optional coverage cfg support.
-    Clippy {
-        /// Enable `RUSTFLAGS=--cfg coverage`.
-        #[arg(long)]
-        coverage_cfg: bool,
-    },
-}
+mod cli;
+mod command;
 
 /// Parses CLI arguments, resolves the project configuration, and runs the
 /// selected command. Parse failures and command failures are reported to
@@ -96,6 +53,10 @@ fn main() {
 }
 
 /// Parses arguments and executes the selected command.
+///
+/// # Parameters
+///
+/// * `cli` - Parsed command-line options.
 fn run(cli: Cli) -> Result<&'static str> {
     let project = fs::canonicalize(&cli.project)?;
     let config_path = resolve_config_path(&project, &cli.config)?;
